@@ -54,6 +54,13 @@ public sealed class StrictFallbackEnforcementTests
     }
 
     [Fact]
+    public void TextEncodingStrict_RefusesAnEncodingThatCannotBeRebuiltStrictly()
+    {
+        // Returning the original encoding would reintroduce replacement fallback.
+        Assert.Throws<NotSupportedException>(() => TextEncoding.Strict(new UnrebuildableEncoding()));
+    }
+
+    [Fact]
     public void TextValidation_RejectsBytesTheEncodingCannotRepresent()
     {
         // IsValidText independently validates UtfUnknown's answer, and the encodings it
@@ -109,5 +116,24 @@ public sealed class StrictFallbackEnforcementTests
         Assert.False(TextEncoding.IsUnicodeEncoding(Encoding.GetEncoding("euc-jp")));
         Assert.False(TextEncoding.IsUnicodeEncoding(Encoding.GetEncoding(1252)));
         Assert.False(TextEncoding.IsUnicodeEncoding(Encoding.GetEncoding("shift_jis")));
+    }
+
+    private sealed class UnrebuildableEncoding : Encoding
+    {
+        public override int CodePage => 65_000_002;
+
+        public override int GetByteCount(char[] chars, int index, int count) => count;
+
+        public override int GetBytes(
+            char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex) => 0;
+
+        public override int GetCharCount(byte[] bytes, int index, int count) => count;
+
+        public override int GetChars(
+            byte[] bytes, int byteIndex, int byteCount, char[] chars, int charIndex) => 0;
+
+        public override int GetMaxByteCount(int charCount) => charCount;
+
+        public override int GetMaxCharCount(int byteCount) => byteCount;
     }
 }

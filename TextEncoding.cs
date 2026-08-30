@@ -265,9 +265,12 @@ internal static class TextEncoding
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
         {
-            // An encoding that cannot be rebuilt from its code page keeps the original
-            // instance rather than failing the caller outright.
-            return encoding;
+            // Returning the original encoding here could silently re-enable its
+            // replacement fallback. A caller that cannot obtain strict semantics must
+            // refuse conversion instead.
+            throw new NotSupportedException(
+                $"Could not construct a strict codec for code page {encoding.CodePage}.",
+                ex);
         }
     }
 
