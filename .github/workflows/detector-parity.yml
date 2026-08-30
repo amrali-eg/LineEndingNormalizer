@@ -1,0 +1,35 @@
+name: Shared Unicode detector parity
+
+on:
+  push:
+    branches: [ master ]
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  parity:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: line-ending-normalizer
+
+      - uses: actions/checkout@v7
+        with:
+          repository: amrali-eg/EncodingChecker
+          ref: master
+          path: encoding-checker
+
+      - name: Verify shared Unicode detector
+        shell: pwsh
+        run: |
+          $ec = Get-Content 'encoding-checker/sources/EncodingChecker/UnicodeDetector.cs' -Raw
+          $len = Get-Content 'line-ending-normalizer/UnicodeDetector.cs' -Raw
+          $ec = $ec -replace 'namespace EncodingChecker;', 'namespace SharedUnicodeDetector;'
+          $len = $len -replace 'namespace LineEndingNormalizer;', 'namespace SharedUnicodeDetector;'
+          $ec = [regex]::Replace($ec, "`r?`n", "`n").TrimStart([char]0xFEFF)
+          $len = [regex]::Replace($len, "`r?`n", "`n").TrimStart([char]0xFEFF)
+          if ($ec -cne $len) {
+            throw 'UnicodeDetector.cs differs between EncodingChecker and LineEndingNormalizer. Keep the algorithm synchronized; application-specific TextEncoding wrappers may differ.'
+          }
