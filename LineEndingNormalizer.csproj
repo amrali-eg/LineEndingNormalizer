@@ -10,7 +10,7 @@
 
     <!-- The SDK derives all managed assembly versions from this value. The release
          workflow also verifies that the tag and app.manifest agree with it. -->
-    <Version>1.4.0</Version>
+    <Version>1.5.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

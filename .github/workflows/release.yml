@@ -28,7 +28,16 @@ jobs:
         run: |
           $tagVersion = "${{ github.ref_name }}" -replace '^v', ''
           [xml]$project = Get-Content "LineEndingNormalizer.csproj"
-          $projectVersion = [string]$project.Project.PropertyGroup.Version
+
+          # Select the Version node explicitly. Member access across several
+          # PropertyGroup elements returns an array, which would stringify into
+          # a value that matches nothing and block the release for the wrong
+          # reason.
+          $versionNodes = $project.SelectNodes("/Project/PropertyGroup/Version")
+          if ($versionNodes.Count -ne 1) {
+            throw "Expected exactly one <Version> in the project file; found $($versionNodes.Count)."
+          }
+          $projectVersion = [string]$versionNodes[0].InnerText
           [xml]$manifest = Get-Content "app.manifest"
           $manifestVersion = [string]$manifest.assembly.assemblyIdentity.version
 

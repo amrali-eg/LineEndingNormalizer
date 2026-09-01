@@ -12,6 +12,7 @@ internal sealed class Statistics
     private int _converted;
     private int _unchanged;
     private int _skipped;
+    private int _refused;
     private int _errors;
 
     /// <summary>
@@ -34,6 +35,12 @@ internal sealed class Statistics
     /// could not be determined.
     /// </summary>
     public int Skipped => _skipped;
+
+    /// <summary>
+    /// Gets the number of files LEN declined to convert because doing so could
+    /// not be shown to be safe. A refusal is a correct outcome, not a failure.
+    /// </summary>
+    public int Refused => _refused;
 
     /// <summary>
     /// Gets the number of files that could not be processed.
@@ -70,6 +77,14 @@ internal sealed class Statistics
     public void IncrementSkipped()
     {
         Interlocked.Increment(ref _skipped);
+    }
+
+    /// <summary>
+    /// Increments the number of safely refused files.
+    /// </summary>
+    public void IncrementRefused()
+    {
+        Interlocked.Increment(ref _refused);
     }
 
     /// <summary>

@@ -32,14 +32,24 @@ leading U+FEFF characters remain part of the text.
 
 ### BOM-less UTF-16
 
-Without a BOM, some byte sequences are valid as both UTF-16LE and UTF-16BE.
-Choosing the wrong order can change which characters are treated as line
+Without a BOM, UTF-16 bytes are usually valid as both UTF-16LE and UTF-16BE:
+byte-swapped Latin text lands in a valid CJK range, so ordinary ASCII content
+decodes cleanly either way. Choosing the wrong order can change which characters are treated as line
 separators. LEN therefore attempts a strict full-file decode in the opposite
 byte order before conversion. If both byte orders are valid, LEN reports
 `AmbiguousBomlessUtf16` and leaves the file unchanged.
 
-This is intentionally conservative. Add the correct BOM or use an encoding
-conversion tool with an explicitly selected source encoding before retrying.
+This is intentionally conservative, and the practical effect is broad: LEN
+converts BOM-less UTF-16 only when the opposite byte order is structurally
+impossible, so **most BOM-less UTF-16 files are refused**. Two similar-looking
+files can behave differently, because whether the opposite order fails depends
+on the characters the file happens to contain.
+
+Establishing this costs a second complete read of the file. That is deliberate:
+a decision to rewrite every line ending in a file should not rest on a sample.
+
+Add the correct BOM or use an encoding conversion tool with an explicitly
+selected source encoding before retrying.
 
 ## Legacy files
 

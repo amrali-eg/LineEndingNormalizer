@@ -40,10 +40,15 @@ internal static class Program
     private const int ExitCancelled = 4;
 
     /// <summary>
-    /// Base directory does not exist. EncodingChecker reports this as
-    /// <see cref="ExitInvalidArguments"/>.
+    /// One or more files were safely refused: LEN declined to convert them
+    /// because doing so could not be shown to be safe, and left them unchanged.
     /// </summary>
-    private const int ExitDirectoryNotFound = 5;
+    /// <remarks>
+    /// Matches EncodingChecker, so a script driving both tools can tell a
+    /// deliberate refusal from a processing failure. A refusal is not an error:
+    /// nothing went wrong and nothing was written.
+    /// </remarks>
+    private const int ExitSafeRefusal = 5;
 
     /// <summary>
     /// -BasePath is a reparse point. EncodingChecker reports this as
@@ -67,6 +72,15 @@ internal static class Program
             args[0] is "/?" or "-?" or "/h" or "-h" or "--help")
         {
             PrintUsage();
+            return ExitSuccess;
+        }
+
+        // Answered before argument validation and without -BasePath, so a
+        // release check can read the version straight from the built binary.
+        if (args.Length == 1 &&
+            args[0] is "--version" or "-version" or "/version" or "-v")
+        {
+            Console.WriteLine(GetDisplayVersion());
             return ExitSuccess;
         }
 
@@ -95,7 +109,7 @@ internal static class Program
                 "Directory not found: {0}",
                 options.BasePath);
 
-            return ExitDirectoryNotFound;
+            return ExitInvalidArguments;
         }
 
         // Candidate paths from directory traversal are always rooted at
@@ -189,10 +203,18 @@ internal static class Program
 
             PrintSummary(statistics, mode);
 
+            // Precedence: a real failure outranks a refusal, and a refusal
+            // outranks -FailOnChanges, because a refused file is one whose
+            // conversion status -FailOnChanges cannot speak for.
             if (!reportOk ||
                 statistics.Errors > 0)
             {
                 return ExitProcessingErrors;
+            }
+
+            if (statistics.Refused > 0)
+            {
+                return ExitSafeRefusal;
             }
 
             if (options.FailOnChanges &&
@@ -621,6 +643,24 @@ internal static class Program
                 ReasonCode: null,
                 ErrorMessage: null);
         }
+        catch (ConversionRefusedException refused)
+        {
+            // LEN worked correctly and declined; nothing was written. Reporting
+            // this as an error would make a safe outcome indistinguishable from
+            // a failure for anything reading the result or the exit code.
+            statistics.IncrementRefused();
+
+            return new FileOutcome(
+                displayPath,
+                file,
+                Result: null,
+                ResultLabel: "Refused",
+                ConsoleVisible: true,
+                Detected: detected,
+                IsError: false,
+                ReasonCode: refused.ReasonCode,
+                ErrorMessage: refused.Message);
+        }
         catch (Exception ex) when (
             ex is not OperationCanceledException)
         {
@@ -645,11 +685,10 @@ internal static class Program
     /// </summary>
     private static string GetErrorReasonCode(Exception exception)
     {
+        // ConversionRefusedException is handled by its own catch before this
+        // runs, so it deliberately has no arm here.
         return exception switch
         {
-            ConversionRefusedException refused =>
-                refused.ReasonCode,
-
             DecoderFallbackException =>
                 "InvalidEncoding",
 
@@ -1475,6 +1514,21 @@ internal static class Program
 
         Console.ResetColor();
 
+        // Shown only when it happened, so the usual summary does not grow a
+        // line that is always zero and stops being read.
+        if (statistics.Refused > 0)
+        {
+            Console.ForegroundColor =
+                ConsoleColor.Yellow;
+
+            Console.WriteLine(
+                "{0,-19}: {1,8}",
+                "Refused",
+                statistics.Refused);
+
+            Console.ResetColor();
+        }
+
         Console.WriteLine(
             "{0,-19}: {1,8}",
             "Failed",
@@ -1505,6 +1559,9 @@ internal static class Program
         Console.WriteLine(
             """
             Usage:
+
+              LineEndingNormalizer.exe --version
+                       Print the version and exit. Needs no other argument.
 
               LineEndingNormalizer.exe
                   -BasePath <directory>
@@ -1582,11 +1639,13 @@ internal static class Program
                        under -ValidateOnly, fails) conversion. Useful as a
                        CI gate with -WhatIf or -ValidateOnly.
 
-            Exit codes: 0 = clean; 1 = usage/argument error; 2 = -FailOnChanges
-            triggered; 3 = one or more files failed to process, or the -Report
-            file could not be written; 4 = cancelled (Ctrl+C); 5 = base
-            directory not found; 6 = -BasePath is a reparse point. Codes 0-4
-            match EncodingChecker's.
+            Exit codes: 0 = clean; 1 = usage/argument error, including a
+            missing -BasePath directory; 2 = -FailOnChanges triggered; 3 = one
+            or more files failed to process, or the -Report file could not be
+            written; 4 = cancelled (Ctrl+C); 5 = one or more files were safely
+            refused and left unchanged; 6 = -BasePath is a reparse point.
+            Codes 0-5 match EncodingChecker's. When several apply the first of
+            3, 5, 2, 0 wins.
 
             Examples:
 

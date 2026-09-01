@@ -49,6 +49,13 @@ Invalid combinations are rejected instead of silently ignored:
 - `-ValidateOnly` with `-WhatIf` or `-Backup`
 - `-WhatIf` with `-Backup`
 
+`-Quiet` is rejected with `-DetectOnly` but accepted with `-ValidateOnly`,
+which looks inconsistent and is not. `-ValidateOnly` reports its finding
+through the exit code, so a quiet run still says something -- that is the
+`-ValidateOnly -FailOnChanges -Quiet` form used in CI. `-DetectOnly` has no
+such signal: its per-file output *is* the result, so suppressing it would leave
+the command with nothing to report.
+
 ## Output and performance
 
 | Option | Meaning |
@@ -97,6 +104,16 @@ Normalize with verified backups and a report:
 LineEndingNormalizer.exe -BasePath . -Include "*" -Target LF -Backup -Report report.csv -Deterministic
 ```
 
+## Version
+
+```powershell
+LineEndingNormalizer.exe --version
+```
+
+Prints the version and exits. It takes no other arguments and does not need
+`-BasePath`, so a release check can read the version from the built binary
+without setting up a scan.
+
 ## Exit codes
 
 | Code | Meaning |
@@ -106,7 +123,23 @@ LineEndingNormalizer.exe -BasePath . -Include "*" -Target LF -Backup -Report rep
 | 2 | `-FailOnChanges` found files requiring conversion. |
 | 3 | One or more files failed, or the report could not be written. |
 | 4 | Cancelled with Ctrl+C. |
-| 5 | Base directory not found. |
+| 5 | One or more files were safely refused and left unchanged. |
 | 6 | Base directory is a link, junction, or other reparse point. |
 
-Codes 0–4 match EncodingChecker's general exit-code meanings.
+A missing base directory reports 1: it is an invalid invocation, not a refusal.
+
+Codes 0–5 match EncodingChecker's exit-code meanings, including 5 for a safe
+refusal, so a script driving both tools can tell a deliberate refusal from a
+processing failure.
+
+When more than one applies, the first of these wins:
+
+```text
+3  a file failed, or the report could not be written
+5  a file was safely refused
+2  -FailOnChanges found files requiring conversion
+0  clean run
+```
+
+A refusal outranks `-FailOnChanges` because a refused file is one whose
+conversion status `-FailOnChanges` cannot speak for.

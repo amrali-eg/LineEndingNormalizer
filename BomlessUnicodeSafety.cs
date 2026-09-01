@@ -88,17 +88,38 @@ internal static class BomlessUnicodeSafety
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                decoder.Convert(
-                    bytes,
-                    0,
-                    read,
-                    chars,
-                    0,
-                    chars.Length,
-                    flush: false,
-                    out _,
-                    out _,
-                    out _);
+                int offset = 0;
+
+                // Convert reports completed=false when the char buffer could not
+                // take the whole chunk, and it does not retain the unconsumed
+                // bytes. Discarding that flag would let this method judge a file
+                // decodable from a prefix of it - and this decision is what
+                // stands between an ambiguous file and being rewritten. The
+                // buffers are sized so it cannot happen today; the loop makes
+                // that safe rather than assumed.
+                while (offset < read)
+                {
+                    decoder.Convert(
+                        bytes,
+                        offset,
+                        read - offset,
+                        chars,
+                        0,
+                        chars.Length,
+                        flush: false,
+                        out int bytesUsed,
+                        out _,
+                        out bool completed);
+
+                    if (bytesUsed == 0 && !completed)
+                    {
+                        // No forward progress is possible; refuse to call this
+                        // a successful decode rather than spin.
+                        return false;
+                    }
+
+                    offset += bytesUsed;
+                }
             }
 
             decoder.Convert(
@@ -111,9 +132,10 @@ internal static class BomlessUnicodeSafety
                 flush: true,
                 out _,
                 out _,
-                out _);
+                out bool flushed);
 
-            return true;
+            // A trailing incomplete code unit leaves the decoder unfinished.
+            return flushed;
         }
         catch (DecoderFallbackException)
         {

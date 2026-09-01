@@ -182,7 +182,10 @@ public sealed class ProgramEndToEndTests
             out _,
             out _);
 
-        Assert.Equal(3, exitCode);
+        // 5, not 3: LEN worked correctly and declined. Reporting a refusal as a
+        // processing failure would make a safe outcome indistinguishable from a
+        // broken one for anything reading the exit code.
+        Assert.Equal(5, exitCode);
         Assert.Equal(original, File.ReadAllBytes(sourcePath));
 
         string row =
@@ -190,7 +193,7 @@ public sealed class ProgramEndToEndTests
                 File.ReadAllLines(reportPath).Skip(1));
 
         Assert.Contains(
-            ",Error,AmbiguousBomlessUtf16,",
+            ",Refused,AmbiguousBomlessUtf16,",
             row,
             StringComparison.Ordinal);
         Assert.Contains(

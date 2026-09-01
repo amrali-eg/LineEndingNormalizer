@@ -37,10 +37,15 @@ LineEndingNormalizer.exe -BasePath C:\Source -Include "*.cs,*.txt" -Target LF -B
 
 ## Important safety limit
 
-A BOM-less UTF-16 file can sometimes be valid under both byte orders. If LEN
-cannot safely distinguish UTF-16LE from UTF-16BE, it refuses conversion and
-leaves the file unchanged. Adding a correct BOM or converting the encoding
-with an explicitly chosen source codec resolves the ambiguity.
+Without a byte-order mark, UTF-16 bytes usually read as valid text in *both*
+byte orders, so the file itself cannot say which one is right. LEN refuses to
+normalize BOM-less UTF-16 unless the bytes prove the byte order -- which for
+ordinary Latin text they do not, because byte-swapped Latin characters land in
+a valid CJK range. **Expect most BOM-less UTF-16 files to be refused.**
+
+Conversion proceeds only when the opposite byte order is structurally
+impossible. Adding a correct BOM, or converting the encoding with an explicitly
+chosen source codec, resolves the ambiguity.
 
 See [Safety and recovery](docs/SAFETY.md) for the complete safety model and
 known limits.
