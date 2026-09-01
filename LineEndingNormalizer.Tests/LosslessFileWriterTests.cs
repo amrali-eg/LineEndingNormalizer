@@ -42,6 +42,42 @@ public sealed class LosslessFileWriterTests
     }
 
     [Fact]
+    public void Utf8WithTwoLeadingBoms_PreservesTheSecondAsText()
+    {
+        using var dir = new TempDirectory();
+
+        byte[] source =
+        [
+            0xEF, 0xBB, 0xBF,
+            0xEF, 0xBB, 0xBF,
+            .. "line1\nline2"u8
+        ];
+
+        string path = dir.WriteFile("double-bom.txt", source);
+
+        NormalizeResult result =
+            NewLineNormalizer.NormalizeFile(
+                path,
+                LineEnding.Crlf,
+                whatIf: false);
+
+        Assert.Equal(NormalizeResult.Converted, result);
+
+        byte[] expected =
+        [
+            0xEF, 0xBB, 0xBF,
+            0xEF, 0xBB, 0xBF,
+            .. "line1\r\nline2"u8
+        ];
+
+        Assert.Equal(expected, File.ReadAllBytes(path));
+
+        DetectResult? detected = NewLineNormalizer.DetectFile(path);
+        Assert.NotNull(detected);
+        Assert.True(detected.HasBom);
+    }
+
+    [Fact]
     public void Utf16LeBom_NormalizesLineEndings_PreservesBomAndNonAsciiContent()
     {
         using var dir = new TempDirectory();
@@ -65,7 +101,7 @@ public sealed class LosslessFileWriterTests
     }
 
     [Fact]
-    public void BomLessUtf16LE_WithNonLatinContent_DetectsAndConvertsCorrectly_WithoutAddingABom()
+    public void BomLessUtf16LE_WhenOppositeByteOrderAlsoDecodes_IsRefusedWithoutWriting()
     {
         using var dir = new TempDirectory();
 
@@ -89,20 +125,79 @@ public sealed class LosslessFileWriterTests
 
         string path = dir.WriteFile("cyrillic_no_bom.txt", source);
 
+        var ex = Assert.Throws<ConversionRefusedException>(() =>
+            NewLineNormalizer.NormalizeFile(
+                path,
+                LineEnding.Crlf,
+                whatIf: false,
+                backup: true));
+
+        Assert.Equal(BomlessUnicodeSafety.AmbiguousReasonCode, ex.ReasonCode);
+        Assert.Equal(source, File.ReadAllBytes(path));
+        Assert.False(File.Exists(path + ".bak"));
+    }
+
+    [Fact]
+    public void BomLessUtf16BE_MisdetectedAsLittleEndian_IsRefusedWithoutTextLoss()
+    {
+        using var dir = new TempDirectory();
+
+        // Under the real UTF-16BE interpretation this is U+4100, U+0A00,
+        // U+4200. Under UTF-16LE the same bytes look like "A", LF, "B".
+        // The old pipeline therefore inserted a false CR before every U+0A00.
+        string authoritativeText =
+            string.Concat(
+                Enumerable.Repeat("\u4100\u0A00\u4200", 20));
+
+        var utf16Be =
+            new UnicodeEncoding(
+                bigEndian: true,
+                byteOrderMark: false,
+                throwOnInvalidBytes: true);
+
+        byte[] source = utf16Be.GetBytes(authoritativeText);
+        string path = dir.WriteFile("ambiguous_utf16be.txt", source);
+
+        DetectResult? detected = NewLineNormalizer.DetectFile(path);
+
+        Assert.NotNull(detected);
+        Assert.Equal(1200, detected.Encoding.CodePage);
+        Assert.False(detected.HasBom);
+
+        var ex = Assert.Throws<ConversionRefusedException>(() =>
+            NewLineNormalizer.NormalizeFile(
+                path,
+                LineEnding.Crlf,
+                whatIf: false,
+                backup: true));
+
+        Assert.Equal(BomlessUnicodeSafety.AmbiguousReasonCode, ex.ReasonCode);
+        Assert.Equal(source, File.ReadAllBytes(path));
+        Assert.Equal(authoritativeText, utf16Be.GetString(File.ReadAllBytes(path)));
+        Assert.False(File.Exists(path + ".bak"));
+    }
+
+    [Fact]
+    public void BomLessUtf16LE_WhenOppositeByteOrderIsInvalid_StillConverts()
+    {
+        using var dir = new TempDirectory();
+
+        // U+00D8 encodes as D8 00 in UTF-16LE, which is an unpaired U+D800
+        // surrogate in UTF-16BE. That makes the byte order structurally clear.
+        string content = string.Concat(Enumerable.Repeat("Øline\n", 20));
+        byte[] source = Encoding.Unicode.GetBytes(content);
+        string path = dir.WriteFile("unambiguous_utf16le.txt", source);
+
         NormalizeResult result =
-            NewLineNormalizer.NormalizeFile(path, LineEnding.Crlf, whatIf: false);
+            NewLineNormalizer.NormalizeFile(
+                path,
+                LineEnding.Crlf,
+                whatIf: false);
 
         Assert.Equal(NormalizeResult.Converted, result);
-
-        byte[] converted = File.ReadAllBytes(path);
-
-        // Conversion must not introduce a BOM that wasn't in the source.
-        Assert.False(converted[0] == 0xFF && converted[1] == 0xFE);
-
-        string expected = string.Concat(Enumerable.Repeat(phrase, 6)) + "\r\n" + secondLine + "\r\n";
-        string actual = Encoding.Unicode.GetString(converted);
-
-        Assert.Equal(expected, actual);
+        Assert.Equal(
+            content.Replace("\n", "\r\n", StringComparison.Ordinal),
+            Encoding.Unicode.GetString(File.ReadAllBytes(path)));
     }
 
     [Fact]

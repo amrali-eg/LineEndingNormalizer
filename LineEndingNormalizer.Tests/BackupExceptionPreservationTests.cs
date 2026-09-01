@@ -88,6 +88,11 @@ public sealed class BackupExceptionPreservationTests
 
         Assert.Equal(NormalizeResult.Converted, result);
         Assert.Equal("alpha\nbeta\n", File.ReadAllText(path + ".bak"));
+        Assert.Equal(
+            System.Security.Cryptography.SHA256.HashData(
+                Lf("alpha\nbeta\n")),
+            System.Security.Cryptography.SHA256.HashData(
+                File.ReadAllBytes(path + ".bak")));
     }
 
     [Fact]

@@ -218,6 +218,14 @@ public sealed class BackupAndReparseWalkTests
         try
         {
             Assert.True(DirectoryTraversal.IsReparsePointDirectory(loopLink));
+            Assert.True(
+                DirectoryTraversal.ShouldSkipFile(
+                    loopLink,
+                    out string? reason));
+            Assert.Contains(
+                "reparse point",
+                reason,
+                StringComparison.OrdinalIgnoreCase);
 
             // Bounded: if the walker ignored the reparse-point check, this
             // would never return.

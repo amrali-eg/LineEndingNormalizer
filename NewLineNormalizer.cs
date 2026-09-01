@@ -78,6 +78,13 @@ internal static class NewLineNormalizer
             return NormalizeResult.Unchanged;
         }
 
+        // A BOM-less UTF-16 guess is not safe to rewrite when the opposite
+        // byte order also strictly accepts the complete file.
+        BomlessUnicodeSafety.EnsureSafeToNormalize(
+            source,
+            scan.Detection,
+            cancellationToken);
+
         if (whatIf)
         {
             return NormalizeResult.Converted;

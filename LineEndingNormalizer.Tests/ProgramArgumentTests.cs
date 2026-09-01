@@ -39,6 +39,26 @@ public sealed class ProgramArgumentTests
     }
 
     [Theory]
+    [InlineData(",,,")]
+    [InlineData(" ; ; ")]
+    [InlineData("   ")]
+    public void ExplicitIncludeWithoutAUsablePattern_Throws(string value)
+    {
+        Assert.Throws<ArgumentException>(() =>
+            Program.ParseArguments(["-BasePath", ".", "-Include", value]));
+    }
+
+    [Theory]
+    [InlineData(",,,")]
+    [InlineData(" ; ; ")]
+    [InlineData("   ")]
+    public void ExplicitExcludeWithoutAUsablePattern_Throws(string value)
+    {
+        Assert.Throws<ArgumentException>(() =>
+            Program.ParseArguments(["-BasePath", ".", "-Exclude", value]));
+    }
+
+    [Theory]
     [InlineData("Crlf", "Crlf")]
     [InlineData("windows", "Crlf")]
     [InlineData("Lf", "Lf")]
@@ -62,15 +82,30 @@ public sealed class ProgramArgumentTests
     }
 
     [Fact]
-    public void VerboseQuietWhatIfFailOnChanges_AreIndependentFlags()
+    public void WhatIfAndFailOnChanges_CanBeCombined()
     {
         Options options = Program.ParseArguments(
-            ["-BasePath", ".", "-Verbose", "-Quiet", "-WhatIf", "-FailOnChanges"]);
+            ["-BasePath", ".", "-WhatIf", "-FailOnChanges"]);
 
-        Assert.True(options.Verbose);
-        Assert.True(options.Quiet);
         Assert.True(options.WhatIf);
         Assert.True(options.FailOnChanges);
+    }
+
+    [Theory]
+    [InlineData("-Verbose", "-Quiet")]
+    [InlineData("-WhatIf", "-ValidateOnly")]
+    [InlineData("-WhatIf", "-Backup")]
+    [InlineData("-ValidateOnly", "-Backup")]
+    [InlineData("-DetectOnly", "-Target", "LF")]
+    [InlineData("-DetectOnly", "-WhatIf")]
+    [InlineData("-DetectOnly", "-Backup")]
+    [InlineData("-DetectOnly", "-FailOnChanges")]
+    [InlineData("-DetectOnly", "-Quiet")]
+    [InlineData("-DetectOnly", "-Verbose")]
+    public void ConflictingModesAndOptions_Throw(params string[] conflicting)
+    {
+        Assert.Throws<ArgumentException>(() =>
+            Program.ParseArguments(["-BasePath", ".", .. conflicting]));
     }
 
     [Fact]
@@ -195,5 +230,14 @@ public sealed class ProgramArgumentTests
             Program.ParseArguments(["-BasePath", ".", "-MaxParallelism", "-4"]));
 
         Assert.Contains("positive integer", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void UnknownSwitch_IsNotConsumedAsAnotherOptionsValue()
+    {
+        ArgumentException ex = Assert.Throws<ArgumentException>(() =>
+            Program.ParseArguments(["-BasePath", "-NotARealFlag"]));
+
+        Assert.Contains("Missing value for -BasePath", ex.Message, StringComparison.Ordinal);
     }
 }

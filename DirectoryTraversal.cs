@@ -95,9 +95,58 @@ internal static class DirectoryTraversal
                         continue;
                     }
 
+                    if (ShouldSkipFile(
+                            file,
+                            out string? reason))
+                    {
+                        if (reason != null)
+                        {
+                            onWarning?.Invoke(reason);
+                        }
+
+                        continue;
+                    }
+
                     yield return file;
                 }
             }
+        }
+    }
+
+
+    /// <summary>
+    /// Rejects file reparse points before any mode can open and follow them.
+    /// Attribute failures are also skipped because LEN cannot prove the path
+    /// is a regular file inside the requested tree.
+    /// </summary>
+    internal static bool ShouldSkipFile(
+        string file,
+        out string? reason)
+    {
+        try
+        {
+            if ((File.GetAttributes(file) &
+                 FileAttributes.ReparsePoint) != 0)
+            {
+                reason =
+                    "Skipping file (symlink/reparse point): " + file;
+
+                return true;
+            }
+
+            reason = null;
+            return false;
+        }
+        catch (Exception ex) when (
+            ex is IOException or
+            UnauthorizedAccessException)
+        {
+            reason =
+                "Skipping file (cannot inspect): " + file +
+                Environment.NewLine +
+                "    " + ex.Message;
+
+            return true;
         }
     }
 

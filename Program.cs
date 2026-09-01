@@ -142,7 +142,9 @@ internal static class Program
 
             var statistics = new Statistics();
 
-            Console.WriteLine("Line Ending Normalizer v1.4");
+            Console.WriteLine(
+                "LineEndingNormalizer v{0}",
+                GetDisplayVersion());
             Console.WriteLine("Base path : {0}", options.BasePath);
             Console.WriteLine(
                 "Patterns  : {0}",
@@ -236,6 +238,9 @@ internal static class Program
         string[] args)
     {
         var options = new Options();
+        bool includeSpecified = false;
+        bool excludeSpecified = false;
+        bool targetSpecified = false;
 
         for (int i = 0;
              i < args.Length;
@@ -259,6 +264,8 @@ internal static class Program
 
                 case "-include":
 
+                    includeSpecified = true;
+
                     if (!TryTakeValue(args, ref i, out string? include))
                     {
                         throw new ArgumentException(
@@ -274,6 +281,8 @@ internal static class Program
 
                 case "-exclude":
 
+                    excludeSpecified = true;
+
                     if (!TryTakeValue(args, ref i, out string? exclude))
                     {
                         throw new ArgumentException(
@@ -288,6 +297,8 @@ internal static class Program
                     break;
 
                 case "-target":
+
+                    targetSpecified = true;
 
                     if (!TryTakeValue(args, ref i, out string? target))
                     {
@@ -367,7 +378,8 @@ internal static class Program
                     if (!TryTakeValue(
                             args,
                             ref i,
-                            out string? maxParallelismText))
+                            out string? maxParallelismText,
+                            allowLeadingDash: true))
                     {
                         throw new ArgumentException(
                             "Missing value for -MaxParallelism.");
@@ -405,7 +417,37 @@ internal static class Program
 
         if (options.IncludePatterns.Count == 0)
         {
+            if (includeSpecified)
+            {
+                throw new ArgumentException(
+                    "-Include must contain at least one non-empty pattern.");
+            }
+
             options.IncludePatterns.Add("*");
+        }
+
+        if (excludeSpecified &&
+            options.ExcludePatterns.Count == 0)
+        {
+            throw new ArgumentException(
+                "-Exclude must contain at least one non-empty pattern.");
+        }
+
+        ValidateOptionCompatibility(
+            options,
+            targetSpecified);
+
+        return options;
+    }
+
+    private static void ValidateOptionCompatibility(
+        Options options,
+        bool targetSpecified)
+    {
+        if (options is { Verbose: true, Quiet: true })
+        {
+            throw new ArgumentException(
+                "-Verbose and -Quiet cannot be combined.");
         }
 
         if (options is { DetectOnly: true, ValidateOnly: true })
@@ -414,23 +456,43 @@ internal static class Program
                 "-DetectOnly and -ValidateOnly cannot be combined.");
         }
 
-        return options;
-    }
-
-    // Prevents a known flag from being consumed as another flag's value.
-    private static readonly HashSet<string> KnownFlagNames =
-        new(StringComparer.OrdinalIgnoreCase)
+        if (options.DetectOnly &&
+            (targetSpecified ||
+             options.WhatIf ||
+             options.Backup ||
+             options.FailOnChanges ||
+             options.Quiet ||
+             options.Verbose))
         {
-            "basepath", "include", "exclude", "target", "verbose",
-            "previewonly", "whatif", "validateonly", "failonchanges",
-            "quiet", "backup", "detectonly", "deterministic", "report",
-            "fullpath", "maxparallelism",
-        };
+            throw new ArgumentException(
+                "-DetectOnly cannot be combined with -Target, -WhatIf, -Backup, " +
+                "-FailOnChanges, -Quiet, or -Verbose.");
+        }
+
+        if (options.ValidateOnly && options.WhatIf)
+        {
+            throw new ArgumentException(
+                "-ValidateOnly and -WhatIf are separate read-only modes and cannot be combined.");
+        }
+
+        if (options.ValidateOnly && options.Backup)
+        {
+            throw new ArgumentException(
+                "-Backup cannot be used with -ValidateOnly because validation never writes files.");
+        }
+
+        if (options.WhatIf && options.Backup)
+        {
+            throw new ArgumentException(
+                "-Backup cannot be used with -WhatIf because preview mode never writes files.");
+        }
+    }
 
     private static bool TryTakeValue(
         string[] args,
         ref int i,
-        [NotNullWhen(true)] out string? value)
+        [NotNullWhen(true)] out string? value,
+        bool allowLeadingDash = false)
     {
         if (i + 1 >= args.Length)
         {
@@ -440,8 +502,8 @@ internal static class Program
 
         string candidate = args[i + 1];
 
-        if (candidate.StartsWith('-') &&
-            KnownFlagNames.Contains(candidate.TrimStart('-')))
+        if (!allowLeadingDash &&
+            candidate.StartsWith('-'))
         {
             value = null;
             return false;
@@ -457,22 +519,13 @@ internal static class Program
     private static string[] SplitPatterns(
         string arg)
     {
-        string[] patterns =
-            arg.Split(
-                [
-                    ',',
-                    ';'
-                ],
-                StringSplitOptions.RemoveEmptyEntries);
-
-        for (int i = 0;
-             i < patterns.Length;
-             i++)
-        {
-            patterns[i] = patterns[i].Trim();
-        }
-
-        return patterns;
+        return arg.Split(
+            [
+                ',',
+                ';'
+            ],
+            StringSplitOptions.RemoveEmptyEntries |
+            StringSplitOptions.TrimEntries);
     }
 
     /// <summary>
@@ -501,6 +554,7 @@ internal static class Program
         bool ConsoleVisible,
         DetectResult? Detected,
         bool IsError,
+        string? ReasonCode,
         string? ErrorMessage);
 
     /// <summary>
@@ -528,6 +582,8 @@ internal static class Program
             mode == ProcessingMode.Normalize &&
             options.Backup;
 
+        DetectResult? detected = null;
+
         try
         {
             NormalizeResult result =
@@ -536,7 +592,7 @@ internal static class Program
                     options.TargetLineEnding,
                     previewOnly,
                     backup,
-                    out DetectResult? detected,
+                    out detected,
                     cancellationToken);
 
             switch (result)
@@ -562,6 +618,7 @@ internal static class Program
                 GetConsoleVisibility(result, options),
                 detected,
                 IsError: false,
+                ReasonCode: null,
                 ErrorMessage: null);
         }
         catch (Exception ex) when (
@@ -575,10 +632,36 @@ internal static class Program
                 Result: null,
                 ResultLabel: "Error",
                 ConsoleVisible: true,
-                Detected: null,
+                Detected: detected,
                 IsError: true,
+                ReasonCode: GetErrorReasonCode(ex),
                 ErrorMessage: ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Gives reports a stable code while keeping the full exception message
+    /// available for diagnosis.
+    /// </summary>
+    private static string GetErrorReasonCode(Exception exception)
+    {
+        return exception switch
+        {
+            ConversionRefusedException refused =>
+                refused.ReasonCode,
+
+            DecoderFallbackException =>
+                "InvalidEncoding",
+
+            UnauthorizedAccessException =>
+                "AccessDenied",
+
+            IOException =>
+                "IoError",
+
+            _ =>
+                "UnexpectedError"
+        };
     }
 
     /// <summary>
@@ -754,7 +837,7 @@ internal static class Program
 
         if (TryWriteReportFile(
                 options.Report!,
-                "File,Encoding,BOM,LineEnding,Target,Result",
+                "File,Encoding,BOM,LineEnding,Target,Result,ReasonCode,Diagnostic",
                 rows,
                 out string? error))
         {
@@ -803,7 +886,9 @@ internal static class Program
             bom,
             lineEnding,
             target,
-            EscapeCsvField(outcome.ResultLabel));
+            EscapeCsvField(outcome.ResultLabel),
+            EscapeCsvField(outcome.ReasonCode ?? ""),
+            EscapeCsvField(outcome.ErrorMessage ?? ""));
     }
 
     #endregion
@@ -1397,14 +1482,28 @@ internal static class Program
     }
 
     /// <summary>
-    /// Displays command-line usage.
+    /// Returns the product version generated from the project version.
     /// </summary>
+    internal static string GetDisplayVersion()
+    {
+        Version version =
+            typeof(Program).Assembly.GetName().Version ??
+            new Version(0, 0, 0);
+
+        return $"{version.Major}.{version.Minor}.{Math.Max(version.Build, 0)}";
+    }
+
+
     private static void PrintUsage()
     {
         Console.WriteLine(
-            """
-            LineEndingNormalizer v1.4
+            "LineEndingNormalizer v{0}",
+            GetDisplayVersion());
 
+        Console.WriteLine();
+
+        Console.WriteLine(
+            """
             Usage:
 
               LineEndingNormalizer.exe
@@ -1419,6 +1518,8 @@ internal static class Program
                        after -Include. The following directories are always
                        skipped: .git, .svn, .hg, .vs, .idea, bin, obj,
                        node_modules, packages, dist, build, target.
+                       Linked files/directories, .bak files, and LEN's
+                       temporary files are also skipped.
 
                   Normalization:
                   [-Target <CRLF|LF|CR>]
@@ -1431,20 +1532,21 @@ internal static class Program
                        Validate without writing anything. Files requiring
                        conversion are reported as Invalid. May be combined
                        with -FailOnChanges. Cannot be combined with
-                       -DetectOnly.
+                       -DetectOnly, -WhatIf, or -Backup.
                   [-DetectOnly]
                        Read-only detection mode. Writes
                        LineEnding,Encoding,BOM,File CSV rows to stdout.
-                       Nothing is modified. -Target, -WhatIf, -Backup,
-                       -FailOnChanges, -Quiet, and -Verbose have no effect.
-                       Cannot be combined with -ValidateOnly.
+                       Nothing is modified. Cannot be combined with
+                       -ValidateOnly, -Target, -WhatIf, -Backup,
+                       -FailOnChanges, -Quiet, or -Verbose.
 
                   Report:
                   [-Report <path>]
                        Write a CSV report in addition to normal console
                        output. Valid in every mode. Detection data is
                        collected before normalization so the report
-                       describes the original file.
+                       describes the original file. Failed rows include a
+                       stable ReasonCode and a detailed Diagnostic.
 
                   Performance:
                   [-MaxParallelism <N>]
@@ -1456,9 +1558,10 @@ internal static class Program
                        Convert mode only. Computes what each file's result
                        would be without writing anything.
                   [-Backup]
-                       Convert mode only (ignored under -WhatIf). Before
-                       overwriting a file, copies the original to
-                       "<file>.bak" (overwriting any previous one).
+                       Convert mode only. Before overwriting a file, copies
+                       the original to "<file>.bak" (overwriting any
+                       previous one) and verifies the backup hash.
+                       Cannot be combined with -WhatIf or -ValidateOnly.
 
                   Output:
                   [-Verbose]
@@ -1476,8 +1579,8 @@ internal static class Program
                   CI / Exit Code:
                   [-FailOnChanges]
                        Exit with a non-zero code when any file requires (or,
-                       under -Validate, fails) conversion. Useful as a CI
-                       gate, optionally with -WhatIf or -Validate.
+                       under -ValidateOnly, fails) conversion. Useful as a
+                       CI gate with -WhatIf or -ValidateOnly.
 
             Exit codes: 0 = clean; 1 = usage/argument error; 2 = -FailOnChanges
             triggered; 3 = one or more files failed to process, or the -Report
