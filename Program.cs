@@ -40,10 +40,15 @@ internal static class Program
     private const int ExitCancelled = 4;
 
     /// <summary>
-    /// Base directory does not exist. EncodingChecker reports this as
-    /// <see cref="ExitInvalidArguments"/>.
+    /// One or more files were safely refused: LEN declined to convert them
+    /// because doing so could not be shown to be safe, and left them unchanged.
     /// </summary>
-    private const int ExitDirectoryNotFound = 5;
+    /// <remarks>
+    /// Matches EncodingChecker, so a script driving both tools can tell a
+    /// deliberate refusal from a processing failure. A refusal is not an error:
+    /// nothing went wrong and nothing was written.
+    /// </remarks>
+    private const int ExitSafeRefusal = 5;
 
     /// <summary>
     /// -BasePath is a reparse point. EncodingChecker reports this as
@@ -67,6 +72,15 @@ internal static class Program
             args[0] is "/?" or "-?" or "/h" or "-h" or "--help")
         {
             PrintUsage();
+            return ExitSuccess;
+        }
+
+        // Answered before argument validation and without -BasePath, so a
+        // release check can read the version straight from the built binary.
+        if (args.Length == 1 &&
+            args[0] is "--version" or "-version" or "/version" or "-v")
+        {
+            Console.WriteLine(GetDisplayVersion());
             return ExitSuccess;
         }
 
@@ -95,7 +109,7 @@ internal static class Program
                 "Directory not found: {0}",
                 options.BasePath);
 
-            return ExitDirectoryNotFound;
+            return ExitInvalidArguments;
         }
 
         // Candidate paths from directory traversal are always rooted at
@@ -142,7 +156,9 @@ internal static class Program
 
             var statistics = new Statistics();
 
-            Console.WriteLine("Line Ending Normalizer v1.4");
+            Console.WriteLine(
+                "LineEndingNormalizer v{0}",
+                GetDisplayVersion());
             Console.WriteLine("Base path : {0}", options.BasePath);
             Console.WriteLine(
                 "Patterns  : {0}",
@@ -187,10 +203,18 @@ internal static class Program
 
             PrintSummary(statistics, mode);
 
+            // Precedence: a real failure outranks a refusal, and a refusal
+            // outranks -FailOnChanges, because a refused file is one whose
+            // conversion status -FailOnChanges cannot speak for.
             if (!reportOk ||
                 statistics.Errors > 0)
             {
                 return ExitProcessingErrors;
+            }
+
+            if (statistics.Refused > 0)
+            {
+                return ExitSafeRefusal;
             }
 
             if (options.FailOnChanges &&
@@ -236,6 +260,9 @@ internal static class Program
         string[] args)
     {
         var options = new Options();
+        bool includeSpecified = false;
+        bool excludeSpecified = false;
+        bool targetSpecified = false;
 
         for (int i = 0;
              i < args.Length;
@@ -259,6 +286,8 @@ internal static class Program
 
                 case "-include":
 
+                    includeSpecified = true;
+
                     if (!TryTakeValue(args, ref i, out string? include))
                     {
                         throw new ArgumentException(
@@ -274,6 +303,8 @@ internal static class Program
 
                 case "-exclude":
 
+                    excludeSpecified = true;
+
                     if (!TryTakeValue(args, ref i, out string? exclude))
                     {
                         throw new ArgumentException(
@@ -288,6 +319,8 @@ internal static class Program
                     break;
 
                 case "-target":
+
+                    targetSpecified = true;
 
                     if (!TryTakeValue(args, ref i, out string? target))
                     {
@@ -367,7 +400,8 @@ internal static class Program
                     if (!TryTakeValue(
                             args,
                             ref i,
-                            out string? maxParallelismText))
+                            out string? maxParallelismText,
+                            allowLeadingDash: true))
                     {
                         throw new ArgumentException(
                             "Missing value for -MaxParallelism.");
@@ -405,7 +439,37 @@ internal static class Program
 
         if (options.IncludePatterns.Count == 0)
         {
+            if (includeSpecified)
+            {
+                throw new ArgumentException(
+                    "-Include must contain at least one non-empty pattern.");
+            }
+
             options.IncludePatterns.Add("*");
+        }
+
+        if (excludeSpecified &&
+            options.ExcludePatterns.Count == 0)
+        {
+            throw new ArgumentException(
+                "-Exclude must contain at least one non-empty pattern.");
+        }
+
+        ValidateOptionCompatibility(
+            options,
+            targetSpecified);
+
+        return options;
+    }
+
+    private static void ValidateOptionCompatibility(
+        Options options,
+        bool targetSpecified)
+    {
+        if (options is { Verbose: true, Quiet: true })
+        {
+            throw new ArgumentException(
+                "-Verbose and -Quiet cannot be combined.");
         }
 
         if (options is { DetectOnly: true, ValidateOnly: true })
@@ -414,23 +478,43 @@ internal static class Program
                 "-DetectOnly and -ValidateOnly cannot be combined.");
         }
 
-        return options;
-    }
-
-    // Prevents a known flag from being consumed as another flag's value.
-    private static readonly HashSet<string> KnownFlagNames =
-        new(StringComparer.OrdinalIgnoreCase)
+        if (options.DetectOnly &&
+            (targetSpecified ||
+             options.WhatIf ||
+             options.Backup ||
+             options.FailOnChanges ||
+             options.Quiet ||
+             options.Verbose))
         {
-            "basepath", "include", "exclude", "target", "verbose",
-            "previewonly", "whatif", "validateonly", "failonchanges",
-            "quiet", "backup", "detectonly", "deterministic", "report",
-            "fullpath", "maxparallelism",
-        };
+            throw new ArgumentException(
+                "-DetectOnly cannot be combined with -Target, -WhatIf, -Backup, " +
+                "-FailOnChanges, -Quiet, or -Verbose.");
+        }
+
+        if (options.ValidateOnly && options.WhatIf)
+        {
+            throw new ArgumentException(
+                "-ValidateOnly and -WhatIf are separate read-only modes and cannot be combined.");
+        }
+
+        if (options.ValidateOnly && options.Backup)
+        {
+            throw new ArgumentException(
+                "-Backup cannot be used with -ValidateOnly because validation never writes files.");
+        }
+
+        if (options.WhatIf && options.Backup)
+        {
+            throw new ArgumentException(
+                "-Backup cannot be used with -WhatIf because preview mode never writes files.");
+        }
+    }
 
     private static bool TryTakeValue(
         string[] args,
         ref int i,
-        [NotNullWhen(true)] out string? value)
+        [NotNullWhen(true)] out string? value,
+        bool allowLeadingDash = false)
     {
         if (i + 1 >= args.Length)
         {
@@ -440,8 +524,8 @@ internal static class Program
 
         string candidate = args[i + 1];
 
-        if (candidate.StartsWith('-') &&
-            KnownFlagNames.Contains(candidate.TrimStart('-')))
+        if (!allowLeadingDash &&
+            candidate.StartsWith('-'))
         {
             value = null;
             return false;
@@ -457,22 +541,13 @@ internal static class Program
     private static string[] SplitPatterns(
         string arg)
     {
-        string[] patterns =
-            arg.Split(
-                [
-                    ',',
-                    ';'
-                ],
-                StringSplitOptions.RemoveEmptyEntries);
-
-        for (int i = 0;
-             i < patterns.Length;
-             i++)
-        {
-            patterns[i] = patterns[i].Trim();
-        }
-
-        return patterns;
+        return arg.Split(
+            [
+                ',',
+                ';'
+            ],
+            StringSplitOptions.RemoveEmptyEntries |
+            StringSplitOptions.TrimEntries);
     }
 
     /// <summary>
@@ -501,6 +576,7 @@ internal static class Program
         bool ConsoleVisible,
         DetectResult? Detected,
         bool IsError,
+        string? ReasonCode,
         string? ErrorMessage);
 
     /// <summary>
@@ -528,6 +604,8 @@ internal static class Program
             mode == ProcessingMode.Normalize &&
             options.Backup;
 
+        DetectResult? detected = null;
+
         try
         {
             NormalizeResult result =
@@ -536,7 +614,7 @@ internal static class Program
                     options.TargetLineEnding,
                     previewOnly,
                     backup,
-                    out DetectResult? detected,
+                    out detected,
                     cancellationToken);
 
             switch (result)
@@ -562,7 +640,26 @@ internal static class Program
                 GetConsoleVisibility(result, options),
                 detected,
                 IsError: false,
+                ReasonCode: null,
                 ErrorMessage: null);
+        }
+        catch (ConversionRefusedException refused)
+        {
+            // LEN worked correctly and declined; nothing was written. Reporting
+            // this as an error would make a safe outcome indistinguishable from
+            // a failure for anything reading the result or the exit code.
+            statistics.IncrementRefused();
+
+            return new FileOutcome(
+                displayPath,
+                file,
+                Result: null,
+                ResultLabel: "Refused",
+                ConsoleVisible: true,
+                Detected: detected,
+                IsError: false,
+                ReasonCode: refused.ReasonCode,
+                ErrorMessage: refused.Message);
         }
         catch (Exception ex) when (
             ex is not OperationCanceledException)
@@ -575,10 +672,35 @@ internal static class Program
                 Result: null,
                 ResultLabel: "Error",
                 ConsoleVisible: true,
-                Detected: null,
+                Detected: detected,
                 IsError: true,
+                ReasonCode: GetErrorReasonCode(ex),
                 ErrorMessage: ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Gives reports a stable code while keeping the full exception message
+    /// available for diagnosis.
+    /// </summary>
+    private static string GetErrorReasonCode(Exception exception)
+    {
+        // ConversionRefusedException is handled by its own catch before this
+        // runs, so it deliberately has no arm here.
+        return exception switch
+        {
+            DecoderFallbackException =>
+                "InvalidEncoding",
+
+            UnauthorizedAccessException =>
+                "AccessDenied",
+
+            IOException =>
+                "IoError",
+
+            _ =>
+                "UnexpectedError"
+        };
     }
 
     /// <summary>
@@ -754,7 +876,7 @@ internal static class Program
 
         if (TryWriteReportFile(
                 options.Report!,
-                "File,Encoding,BOM,LineEnding,Target,Result",
+                "File,Encoding,BOM,LineEnding,Target,Result,ReasonCode,Diagnostic",
                 rows,
                 out string? error))
         {
@@ -803,7 +925,9 @@ internal static class Program
             bom,
             lineEnding,
             target,
-            EscapeCsvField(outcome.ResultLabel));
+            EscapeCsvField(outcome.ResultLabel),
+            EscapeCsvField(outcome.ReasonCode ?? ""),
+            EscapeCsvField(outcome.ErrorMessage ?? ""));
     }
 
     #endregion
@@ -1390,6 +1514,21 @@ internal static class Program
 
         Console.ResetColor();
 
+        // Shown only when it happened, so the usual summary does not grow a
+        // line that is always zero and stops being read.
+        if (statistics.Refused > 0)
+        {
+            Console.ForegroundColor =
+                ConsoleColor.Yellow;
+
+            Console.WriteLine(
+                "{0,-19}: {1,8}",
+                "Refused",
+                statistics.Refused);
+
+            Console.ResetColor();
+        }
+
         Console.WriteLine(
             "{0,-19}: {1,8}",
             "Failed",
@@ -1397,15 +1536,32 @@ internal static class Program
     }
 
     /// <summary>
-    /// Displays command-line usage.
+    /// Returns the product version generated from the project version.
     /// </summary>
+    internal static string GetDisplayVersion()
+    {
+        Version version =
+            typeof(Program).Assembly.GetName().Version ??
+            new Version(0, 0, 0);
+
+        return $"{version.Major}.{version.Minor}.{Math.Max(version.Build, 0)}";
+    }
+
+
     private static void PrintUsage()
     {
         Console.WriteLine(
-            """
-            LineEndingNormalizer v1.4
+            "LineEndingNormalizer v{0}",
+            GetDisplayVersion());
 
+        Console.WriteLine();
+
+        Console.WriteLine(
+            """
             Usage:
+
+              LineEndingNormalizer.exe --version
+                       Print the version and exit. Needs no other argument.
 
               LineEndingNormalizer.exe
                   -BasePath <directory>
@@ -1419,6 +1575,8 @@ internal static class Program
                        after -Include. The following directories are always
                        skipped: .git, .svn, .hg, .vs, .idea, bin, obj,
                        node_modules, packages, dist, build, target.
+                       Linked files/directories, .bak files, and LEN's
+                       temporary files are also skipped.
 
                   Normalization:
                   [-Target <CRLF|LF|CR>]
@@ -1431,20 +1589,21 @@ internal static class Program
                        Validate without writing anything. Files requiring
                        conversion are reported as Invalid. May be combined
                        with -FailOnChanges. Cannot be combined with
-                       -DetectOnly.
+                       -DetectOnly, -WhatIf, or -Backup.
                   [-DetectOnly]
                        Read-only detection mode. Writes
                        LineEnding,Encoding,BOM,File CSV rows to stdout.
-                       Nothing is modified. -Target, -WhatIf, -Backup,
-                       -FailOnChanges, -Quiet, and -Verbose have no effect.
-                       Cannot be combined with -ValidateOnly.
+                       Nothing is modified. Cannot be combined with
+                       -ValidateOnly, -Target, -WhatIf, -Backup,
+                       -FailOnChanges, -Quiet, or -Verbose.
 
                   Report:
                   [-Report <path>]
                        Write a CSV report in addition to normal console
                        output. Valid in every mode. Detection data is
                        collected before normalization so the report
-                       describes the original file.
+                       describes the original file. Failed rows include a
+                       stable ReasonCode and a detailed Diagnostic.
 
                   Performance:
                   [-MaxParallelism <N>]
@@ -1456,9 +1615,10 @@ internal static class Program
                        Convert mode only. Computes what each file's result
                        would be without writing anything.
                   [-Backup]
-                       Convert mode only (ignored under -WhatIf). Before
-                       overwriting a file, copies the original to
-                       "<file>.bak" (overwriting any previous one).
+                       Convert mode only. Before overwriting a file, copies
+                       the original to "<file>.bak" (overwriting any
+                       previous one) and verifies the backup hash.
+                       Cannot be combined with -WhatIf or -ValidateOnly.
 
                   Output:
                   [-Verbose]
@@ -1476,14 +1636,16 @@ internal static class Program
                   CI / Exit Code:
                   [-FailOnChanges]
                        Exit with a non-zero code when any file requires (or,
-                       under -Validate, fails) conversion. Useful as a CI
-                       gate, optionally with -WhatIf or -Validate.
+                       under -ValidateOnly, fails) conversion. Useful as a
+                       CI gate with -WhatIf or -ValidateOnly.
 
-            Exit codes: 0 = clean; 1 = usage/argument error; 2 = -FailOnChanges
-            triggered; 3 = one or more files failed to process, or the -Report
-            file could not be written; 4 = cancelled (Ctrl+C); 5 = base
-            directory not found; 6 = -BasePath is a reparse point. Codes 0-4
-            match EncodingChecker's.
+            Exit codes: 0 = clean; 1 = usage/argument error, including a
+            missing -BasePath directory; 2 = -FailOnChanges triggered; 3 = one
+            or more files failed to process, or the -Report file could not be
+            written; 4 = cancelled (Ctrl+C); 5 = one or more files were safely
+            refused and left unchanged; 6 = -BasePath is a reparse point.
+            Codes 0-5 match EncodingChecker's. When several apply the first of
+            3, 5, 2, 0 wins.
 
             Examples:
 

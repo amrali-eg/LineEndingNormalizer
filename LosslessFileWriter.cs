@@ -2,6 +2,7 @@
 using System.ComponentModel;
 using System.IO.Hashing;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace LineEndingNormalizer;
@@ -23,6 +24,10 @@ internal static class LosslessFileWriter
     /// Temporary conversion-file suffix excluded from directory scans.
     /// </summary>
     internal const string TempFileSuffix = "len.tmp";
+
+    private sealed record WriteResult(
+        byte[] VerificationHash,
+        byte[] SourceSha256);
 
     /// <summary>
     /// Line separators recognized during Unicode normalization.
@@ -111,7 +116,7 @@ internal static class LosslessFileWriter
                 source.Position =
                     preamble.Length;
 
-                byte[] expectedHash =
+                WriteResult writeResult =
                     isUnicode
                         ? WriteConvertedFileUnicode(
                             source,
@@ -137,14 +142,14 @@ internal static class LosslessFileWriter
                         tempPath,
                         encoding,
                         preamble,
-                        expectedHash,
+                        writeResult.VerificationHash,
                         cancellationToken);
                 }
                 else
                 {
                     VerifyConvertedFileBytes(
                         tempPath,
-                        expectedHash,
+                        writeResult.VerificationHash,
                         cancellationToken);
                 }
 
@@ -172,7 +177,9 @@ internal static class LosslessFileWriter
                     {
                         CreateBackup(
                             path,
-                            directory);
+                            directory,
+                            writeResult.SourceSha256,
+                            cancellationToken);
                     }
 
                     cancellationToken.ThrowIfCancellationRequested();
@@ -430,7 +437,9 @@ internal static class LosslessFileWriter
     /// </summary>
     private static void CreateBackup(
         string path,
-        string directory)
+        string directory,
+        byte[] expectedSourceSha256,
+        CancellationToken cancellationToken)
     {
         // Sharing the conversion temp suffix means this file is excluded from
         // future scans by the same directory-traversal rule as .len.tmp,
@@ -463,11 +472,52 @@ internal static class LosslessFileWriter
                            BufferSize,
                            FileOptions.SequentialScan))
             {
-                backupSource.CopyTo(
-                    backupOutput,
-                    BufferSize);
+                byte[] buffer =
+                    ArrayPool<byte>.Shared.Rent(BufferSize);
 
-                backupOutput.Flush(true);
+                try
+                {
+                    using IncrementalHash backupHasher =
+                        IncrementalHash.CreateHash(
+                            HashAlgorithmName.SHA256);
+
+                    int read;
+
+                    while ((read =
+                               backupSource.Read(
+                                   buffer,
+                                   0,
+                                   buffer.Length)) > 0)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        backupHasher.AppendData(
+                            buffer.AsSpan(0, read));
+
+                        backupOutput.Write(
+                            buffer,
+                            0,
+                            read);
+                    }
+
+                    backupOutput.Flush(true);
+
+                    byte[] backupSha256 =
+                        backupHasher.GetHashAndReset();
+
+                    if (!CryptographicOperations.FixedTimeEquals(
+                            backupSha256,
+                            expectedSourceSha256))
+                    {
+                        throw new ConversionRefusedException(
+                            "BackupVerificationFailed",
+                            "Backup verification failed: the backup does not match the exact source bytes used for conversion.");
+                    }
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(buffer);
+                }
             }
 
             string backupPath = path + ".bak";
@@ -530,6 +580,11 @@ internal static class LosslessFileWriter
                     $"The backup was written, but the previous backup's ReadOnly " +
                     $"attribute could not be restored: {restoreError}");
             }
+
+            VerifyFileSha256(
+                backupPath,
+                expectedSourceSha256,
+                cancellationToken);
         }
         finally
         {
@@ -546,6 +601,60 @@ internal static class LosslessFileWriter
         }
     }
 
+
+    /// <summary>
+    /// Verifies the installed backup, not only the temporary copy that was
+    /// prepared before installation.
+    /// </summary>
+    private static void VerifyFileSha256(
+        string path,
+        byte[] expectedSha256,
+        CancellationToken cancellationToken)
+    {
+        using FileStream input =
+            new(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                BufferSize,
+                FileOptions.SequentialScan);
+
+        using IncrementalHash hasher =
+            IncrementalHash.CreateHash(
+                HashAlgorithmName.SHA256);
+
+        byte[] buffer =
+            ArrayPool<byte>.Shared.Rent(BufferSize);
+
+        try
+        {
+            int read;
+
+            while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                hasher.AppendData(buffer.AsSpan(0, read));
+            }
+
+            byte[] actualSha256 =
+                hasher.GetHashAndReset();
+
+            if (!CryptographicOperations.FixedTimeEquals(
+                    actualSha256,
+                    expectedSha256))
+            {
+                throw new ConversionRefusedException(
+                    "BackupVerificationFailed",
+                    "Backup verification failed: the installed backup does not match the exact source bytes used for conversion.");
+            }
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
     #endregion
 
 
@@ -554,7 +663,7 @@ internal static class LosslessFileWriter
     /// <summary>
     /// Strictly converts Unicode input and returns a verification hash.
     /// </summary>
-    private static byte[] WriteConvertedFileUnicode(
+    private static WriteResult WriteConvertedFileUnicode(
         FileStream source,
         Encoding encoding,
         LineEnding target,
@@ -629,6 +738,12 @@ internal static class LosslessFileWriter
             var hasher =
                 new XxHash3();
 
+            using IncrementalHash sourceHasher =
+                IncrementalHash.CreateHash(
+                    HashAlgorithmName.SHA256);
+
+            sourceHasher.AppendData(preamble);
+
             bool pendingCr = false;
 
             int read;
@@ -640,6 +755,9 @@ internal static class LosslessFileWriter
                            BufferSize)) > 0)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                sourceHasher.AppendData(
+                    inputBuffer.AsSpan(0, read));
 
                 int decodedCount =
                     decoder.GetChars(
@@ -715,7 +833,9 @@ internal static class LosslessFileWriter
 
             output.Flush(true);
 
-            return hasher.GetHashAndReset();
+            return new WriteResult(
+                hasher.GetHashAndReset(),
+                sourceHasher.GetHashAndReset());
         }
         finally
         {
@@ -998,7 +1118,7 @@ internal static class LosslessFileWriter
     /// <summary>
     /// Normalizes approved legacy input as raw bytes.
     /// </summary>
-    private static byte[] WriteConvertedFileBytes(
+    private static WriteResult WriteConvertedFileBytes(
         FileStream source,
         LineEnding target,
         string tempPath,
@@ -1029,6 +1149,10 @@ internal static class LosslessFileWriter
             var hasher =
                 new XxHash3();
 
+            using IncrementalHash sourceHasher =
+                IncrementalHash.CreateHash(
+                    HashAlgorithmName.SHA256);
+
             bool pendingCr = false;
 
             int read;
@@ -1040,6 +1164,9 @@ internal static class LosslessFileWriter
                            BufferSize)) > 0)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                sourceHasher.AppendData(
+                    inputBuffer.AsSpan(0, read));
 
                 int normalizedCount =
                     NormalizeBytes(
@@ -1080,7 +1207,9 @@ internal static class LosslessFileWriter
 
             output.Flush(true);
 
-            return hasher.GetHashAndReset();
+            return new WriteResult(
+                hasher.GetHashAndReset(),
+                sourceHasher.GetHashAndReset());
         }
         finally
         {
@@ -1286,9 +1415,6 @@ internal static class LosslessFileWriter
         0x00000002;
 
     /// <summary>
-    /// Atomically replaces the destination where supported.
-    /// </summary>
-    /// <summary>
     /// Restores previously cleared backup attributes, returning the failure message
     /// instead of throwing so a caller can decide whether it outranks an error already
     /// in flight.
@@ -1316,6 +1442,9 @@ internal static class LosslessFileWriter
     }
 
 
+    /// <summary>
+    /// Atomically replaces the destination where supported.
+    /// </summary>
     private static void AtomicReplace(
         string source,
         string destination)

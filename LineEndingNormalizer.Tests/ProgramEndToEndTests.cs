@@ -90,7 +90,9 @@ public sealed class ProgramEndToEndTests
 
         string[] lines = File.ReadAllLines(reportPath);
 
-        Assert.Equal("File,Encoding,BOM,LineEnding,Target,Result", lines[0]);
+        Assert.Equal(
+            "File,Encoding,BOM,LineEnding,Target,Result,ReasonCode,Diagnostic",
+            lines[0]);
 
         string? alreadyRow = lines.FirstOrDefault(l => l.StartsWith("already.txt,", StringComparison.Ordinal));
         string? needsConvertRow = lines.FirstOrDefault(l => l.StartsWith("needsconvert.txt,", StringComparison.Ordinal));
@@ -98,8 +100,106 @@ public sealed class ProgramEndToEndTests
         Assert.NotNull(alreadyRow);
         Assert.NotNull(needsConvertRow);
 
-        Assert.Equal("already.txt,ASCII,No,CRLF,CRLF,Unchanged", alreadyRow);
-        Assert.Equal("needsconvert.txt,ASCII,No,LF,CRLF,Would convert", needsConvertRow);
+        Assert.Equal("already.txt,ASCII,No,CRLF,CRLF,Unchanged,,", alreadyRow);
+        Assert.Equal("needsconvert.txt,ASCII,No,LF,CRLF,Would convert,,", needsConvertRow);
+    }
+
+    [Fact]
+    public void Report_BackupFailureIncludesStableReasonAndDiagnostic()
+    {
+        using var dir = new TempDirectory();
+        using var reportDir = new TempDirectory();
+
+        string sourcePath =
+            dir.WriteFile(
+                "backupfail.txt",
+                Encoding.ASCII.GetBytes("a\nb\n"));
+
+        Directory.CreateDirectory(sourcePath + ".bak");
+
+        string reportPath =
+            reportDir.CombinePath("report.csv");
+
+        int exitCode = RunMain(
+            [
+                "-BasePath", dir.Path,
+                "-Target", "CRLF",
+                "-Backup",
+                "-Report", reportPath,
+                "-Quiet"
+            ],
+            out _,
+            out _);
+
+        Assert.Equal(3, exitCode);
+        Assert.Equal(
+            Encoding.ASCII.GetBytes("a\nb\n"),
+            File.ReadAllBytes(sourcePath));
+
+        string row =
+            Assert.Single(
+                File.ReadAllLines(reportPath).Skip(1));
+
+        Assert.Contains(",Error,AccessDenied,", row, StringComparison.Ordinal);
+        Assert.Contains("backup", row, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Report_AmbiguousBomlessUtf16IncludesRefusalReason()
+    {
+        using var dir = new TempDirectory();
+        using var reportDir = new TempDirectory();
+
+        var text = new StringBuilder();
+
+        for (int i = 0; i < 20; i++)
+        {
+            text.Append('\u4100');
+            text.Append('\u0A00');
+            text.Append('\u4200');
+        }
+
+        string sourcePath =
+            dir.WriteFile(
+                "ambiguous.txt",
+                new UnicodeEncoding(
+                        bigEndian: true,
+                        byteOrderMark: false,
+                        throwOnInvalidBytes: true)
+                    .GetBytes(text.ToString()));
+
+        byte[] original = File.ReadAllBytes(sourcePath);
+        string reportPath = reportDir.CombinePath("report.csv");
+
+        int exitCode = RunMain(
+            [
+                "-BasePath", dir.Path,
+                "-Target", "CRLF",
+                "-WhatIf",
+                "-Report", reportPath,
+                "-Quiet"
+            ],
+            out _,
+            out _);
+
+        // 5, not 3: LEN worked correctly and declined. Reporting a refusal as a
+        // processing failure would make a safe outcome indistinguishable from a
+        // broken one for anything reading the exit code.
+        Assert.Equal(5, exitCode);
+        Assert.Equal(original, File.ReadAllBytes(sourcePath));
+
+        string row =
+            Assert.Single(
+                File.ReadAllLines(reportPath).Skip(1));
+
+        Assert.Contains(
+            ",Refused,AmbiguousBomlessUtf16,",
+            row,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "valid as both",
+            row,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -221,10 +321,65 @@ public sealed class ProgramEndToEndTests
         byte[] originalBytes = Encoding.ASCII.GetBytes("a\nb\n");
         string path = dir.WriteFile("invalid.txt", originalBytes);
 
-        RunMain(["-BasePath", dir.Path, "-Target", "CRLF", "-ValidateOnly", "-Backup"], out _, out _);
+        RunMain(["-BasePath", dir.Path, "-Target", "CRLF", "-ValidateOnly"], out _, out _);
 
         Assert.Equal(originalBytes, File.ReadAllBytes(path));
         Assert.False(File.Exists(path + ".bak"));
+    }
+
+    [Fact]
+    public void LinkedFiles_AreSkippedInEveryMode()
+    {
+        using var root = new TempDirectory();
+        using var targetDirectory = new TempDirectory();
+
+        string target =
+            targetDirectory.WriteFile(
+                "target.txt",
+                Encoding.ASCII.GetBytes("a\nb\n"));
+
+        string linked = root.CombinePath("linked.txt");
+
+        try
+        {
+            File.CreateSymbolicLink(linked, target);
+        }
+        catch (Exception ex) when (
+            ex is IOException or
+            UnauthorizedAccessException or
+            PlatformNotSupportedException)
+        {
+            // Some Windows hosts do not permit creating symlinks. The
+            // attribute-level rule remains covered by BackupAndReparseWalkTests.
+            return;
+        }
+
+        string[][] modeArguments =
+        [
+            ["-Target", "CRLF"],
+            ["-Target", "CRLF", "-WhatIf"],
+            ["-Target", "CRLF", "-ValidateOnly"],
+            ["-DetectOnly"]
+        ];
+
+        byte[] original = File.ReadAllBytes(target);
+
+        foreach (string[] mode in modeArguments)
+        {
+            string[] arguments =
+            ["-BasePath", root.Path, "-Include", "*", .. mode];
+
+            int exitCode =
+                RunMain(
+                    arguments,
+                    out string stdout,
+                    out string stderr);
+
+            Assert.Equal(0, exitCode);
+            Assert.DoesNotContain("linked.txt", stdout, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("linked.txt", stderr, StringComparison.OrdinalIgnoreCase);
+            Assert.Equal(original, File.ReadAllBytes(target));
+        }
     }
 
     [Fact]
@@ -315,7 +470,9 @@ public sealed class ProgramEndToEndTests
         int exitCode = RunMain([flag], out string stdout, out _);
 
         Assert.Equal(0, exitCode);
-        Assert.Contains("LineEndingNormalizer v1.4", stdout);
+        Assert.Contains(
+            "LineEndingNormalizer v" + Program.GetDisplayVersion(),
+            stdout);
         Assert.Contains("Usage:", stdout);
     }
 }
