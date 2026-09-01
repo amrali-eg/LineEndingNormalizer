@@ -36,3 +36,53 @@ bytes and copies every other byte unchanged.
 The public per-file evidence and methodology are maintained in CorpusTesters.
 Safety claims should cite a clean, committed build and its recorded hashes,
 not only a version name.
+
+## Release records
+
+### v1.5.0 — not corpus-audited
+
+**No corpus run has been performed against LEN.** The audit described above
+measures the shared detector through EncodingChecker; nothing has measured
+LEN's writer against a corpus of real files. Detection results carry over
+because the detector source is in parity, verified below. Everything specific
+to this release — the BOM-less UTF-16 refusal, backup hash verification, the
+refusal reporting contract — rests on the regression suite, not on measurement.
+
+```
+commit    ac9035cc2a43bd50c338bf2e3d4280d085ab1c08   (annotated tag v1.5.0)
+project   1.5.0     manifest 1.5.0.0     binary reports 1.5.0
+tests     295 passed, 0 failed
+build     0 warnings under -warnaserror
+```
+
+Published artifacts, digests as recorded by GitHub:
+
+```
+LineEndingNormalizer-1.5.0-framework-dependent.zip
+  sha256:0e206e0db83c928984f229d5cac9cf0119c3424ff4bfaad64a1dc13970d672b1
+LineEndingNormalizer-1.5.0-win-x64-self-contained.zip
+  sha256:51c2f7205920e26d7ca02b4756e7de71d658bc70304f4eea9fc4e75050b223b6
+```
+
+These are the archives, not the assembly inside them. The release workflow
+refuses to publish unless the git tag, the project version, and the application
+manifest agree.
+
+Detector parity at release, over three clean checkouts level with their
+remotes — `TextValidation.cs`, `UnicodeDetector.cs`, and `TextEncoding.Strict`
+identical across all three:
+
+```
+EncodingChecker        f1b6c09
+LineEndingNormalizer   ac9035c   (this release)
+CorpusTesters          3830eff
+```
+
+Parity proves the three copies agree, not that they are correct. Three
+identical copies of a wrong detector would pass it.
+
+**What is still unmeasured for this release.** Filesystem and replacement
+behaviour on FAT32, exFAT, and network shares; cancellation at each backup
+stage; reconciliation of report rows under high file counts; and a smoke check
+of the published archives rather than a locally built binary. These are
+untested rather than known-good.
