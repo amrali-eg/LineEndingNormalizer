@@ -86,3 +86,69 @@ behaviour on FAT32, exFAT, and network shares; cancellation at each backup
 stage; reconciliation of report rows under high file counts; and a smoke check
 of the published archives rather than a locally built binary. These are
 untested rather than known-good.
+
+### v1.6.0 — not corpus-audited
+
+**No corpus run has been performed against LEN.** As with v1.5.0, detection
+results carry over through detector parity with EncodingChecker, verified
+below. This release adds one new refusal path (BOM-less UTF-32 ambiguity,
+mirroring the existing UTF-16 guard) and closes a test-coverage gap in the
+backup hash-verification check; both rest on the regression suite, not on
+corpus measurement.
+
+```
+commit    31dd78ac4c28a9e8713c09c49a13d2f7f8733add   (annotated tag v1.6.0)
+project   1.6.0     manifest 1.6.0.0     binary reports 1.6.0
+tests     299 passed, 0 failed
+build     0 warnings
+```
+
+Published archives, digests verified against a local download rather than
+trusting GitHub's own report of them — and confirmed to equal what GitHub
+itself reports as each asset's digest:
+
+```
+LineEndingNormalizer-1.6.0-framework-dependent.zip
+  sha256:5e84eccbc1e2d28ae09c9b25a775d43d20417756f231caf783019d6469215baf
+LineEndingNormalizer-1.6.0-win-x64-self-contained.zip
+  sha256:b3c174f05a779290e6db691b283bd5b29c3a1fceb5b535f3fb5b27181f63fb1c
+```
+
+**The executables inside were not independently reproduced this release.**
+Rebuilding both from a clean checkout of this same commit, on the same SDK
+(10.0.401) and runtime (10.0.12) the release workflow used, produced files of
+identical size but not identical bytes: exactly 160 bytes differ in each
+executable, regardless of the executable's total size (561,606 bytes for the
+framework-dependent build; 73,915,555 for the self-contained one). The
+constant, size-independent difference count points at the single-file bundle
+header rather than the compiled managed code, but the cause was not isolated.
+EncodingChecker's executables reproduced byte-for-byte from a clean checkout
+twice this same session under the same tooling, so this is not assumed to be
+inherent to .NET single-file publishing in general — it is recorded as an
+open question for this release rather than asserted as safe. The archive
+digest match above is what this record actually rests on.
+
+These are the archives, not the assembly inside them. The release workflow
+refuses to publish unless the git tag, the project version, and the application
+manifest agree.
+
+Detector parity at release, over three clean checkouts level with their
+remotes — `TextValidation.cs`, `UnicodeDetector.cs`, and `TextEncoding.Strict`
+identical across all three:
+
+```
+EncodingChecker        0002c44
+LineEndingNormalizer   31dd78a   (this release)
+CorpusTesters          d84158f
+```
+
+Parity proves the three copies agree, not that they are correct. Three
+identical copies of a wrong detector would pass it.
+
+**What is still unmeasured for this release.** Everything listed under
+v1.5.0's "still unmeasured" remains true, plus: the executable-reproducibility
+gap noted above, and no filesystem-level exercise of the new UTF-32 guard
+(its regression tests call the internal guard directly, since a file cannot
+both need conversion and be genuinely byte-order-ambiguous under UTF-32 — see
+[SAFETY.md](SAFETY.md) and [RELEASE-NOTES-v1.6.0.md](RELEASE-NOTES-v1.6.0.md)
+for why).
