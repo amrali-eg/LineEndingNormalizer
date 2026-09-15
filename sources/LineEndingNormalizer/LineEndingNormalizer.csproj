@@ -14,17 +14,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!--
-      LineEndingNormalizer.Tests lives in a subdirectory of this project.
-      SDK-style implicit globbing (**/*.cs) would otherwise sweep its
-      source (and generated obj/ files) into this project's own compile.
-    -->
-    <Compile Remove="LineEndingNormalizer.Tests\**\*.cs" />
-    <None Remove="LineEndingNormalizer.Tests\**\*" />
-    <Content Remove="LineEndingNormalizer.Tests\**\*" />
-  </ItemGroup>
-
-  <ItemGroup>
     <PackageReference Include="System.IO.Hashing" Version="9.0.0" />
     <PackageReference Include="UTF.Unknown" Version="2.7.0" />
   </ItemGroup>

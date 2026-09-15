@@ -1,4 +1,4 @@
 <Solution>
-  <Project Path="LineEndingNormalizer.csproj" />
+  <Project Path="LineEndingNormalizer\LineEndingNormalizer.csproj" />
   <Project Path="LineEndingNormalizer.Tests\LineEndingNormalizer.Tests.csproj" />
 </Solution>

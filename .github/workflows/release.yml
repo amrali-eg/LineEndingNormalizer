@@ -27,7 +27,7 @@ jobs:
         shell: pwsh
         run: |
           $tagVersion = "${{ github.ref_name }}" -replace '^v', ''
-          [xml]$project = Get-Content "LineEndingNormalizer.csproj"
+          [xml]$project = Get-Content "sources\LineEndingNormalizer\LineEndingNormalizer.csproj"
 
           # Select the Version node explicitly. Member access across several
           # PropertyGroup elements returns an array, which would stringify into
@@ -38,7 +38,7 @@ jobs:
             throw "Expected exactly one <Version> in the project file; found $($versionNodes.Count)."
           }
           $projectVersion = [string]$versionNodes[0].InnerText
-          [xml]$manifest = Get-Content "app.manifest"
+          [xml]$manifest = Get-Content "sources\LineEndingNormalizer\app.manifest"
           $manifestVersion = [string]$manifest.assembly.assemblyIdentity.version
 
           if ($tagVersion -ne $projectVersion) {
@@ -50,16 +50,16 @@ jobs:
           }
 
       - name: Build
-        run: dotnet build LineEndingNormalizer.slnx --configuration Release
+        run: dotnet build sources\LineEndingNormalizer.slnx --configuration Release
 
       - name: Test
-        run: dotnet test LineEndingNormalizer.slnx --configuration Release --no-build
+        run: dotnet test sources\LineEndingNormalizer.slnx --configuration Release --no-build
 
       - name: Publish framework-dependent single-file executable
-        run: dotnet publish LineEndingNormalizer.csproj -p:PublishProfile=FolderProfile
+        run: dotnet publish sources\LineEndingNormalizer\LineEndingNormalizer.csproj -p:PublishProfile=FolderProfile
 
       - name: Publish self-contained single-file executable
-        run: dotnet publish LineEndingNormalizer.csproj -p:PublishProfile=SelfContainedRelease
+        run: dotnet publish sources\LineEndingNormalizer\LineEndingNormalizer.csproj -p:PublishProfile=SelfContainedRelease
 
       - name: Code-sign executables
         if: ${{ env.CODE_SIGNING_CERT != '' && env.CODE_SIGNING_CERT_PASSWORD != '' }}
@@ -78,8 +78,8 @@ jobs:
             }
 
             & $signtool sign /f $certPath /p $env:CODE_SIGNING_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 `
-              "bin\Release\net10.0\publish\win-x64\LineEndingNormalizer.exe" `
-              "bin\Release\net10.0\publish\win-x64-selfcontained\LineEndingNormalizer.exe"
+              "sources\LineEndingNormalizer\bin\Release\net10.0\publish\win-x64\LineEndingNormalizer.exe" `
+              "sources\LineEndingNormalizer\bin\Release\net10.0\publish\win-x64-selfcontained\LineEndingNormalizer.exe"
 
             if ($LASTEXITCODE -ne 0) {
               throw "signtool exited with code $LASTEXITCODE."
@@ -95,8 +95,8 @@ jobs:
           # project's <Version> convention (no "v" prefix).
           $version = "${{ github.ref_name }}" -replace '^v', ''
 
-          Compress-Archive -Path "bin\Release\net10.0\publish\win-x64\*" -DestinationPath "LineEndingNormalizer-$version-framework-dependent.zip"
-          Compress-Archive -Path "bin\Release\net10.0\publish\win-x64-selfcontained\*" -DestinationPath "LineEndingNormalizer-$version-win-x64-self-contained.zip"
+          Compress-Archive -Path "sources\LineEndingNormalizer\bin\Release\net10.0\publish\win-x64\*" -DestinationPath "LineEndingNormalizer-$version-framework-dependent.zip"
+          Compress-Archive -Path "sources\LineEndingNormalizer\bin\Release\net10.0\publish\win-x64-selfcontained\*" -DestinationPath "LineEndingNormalizer-$version-win-x64-self-contained.zip"
 
       - name: Create GitHub release
         env:
