@@ -51,6 +51,23 @@ a decision to rewrite every line ending in a file should not rest on a sample.
 Add the correct BOM or use an encoding conversion tool with an explicitly
 selected source encoding before retrying.
 
+### BOM-less UTF-32
+
+The same opposite-byte-order check applies to BOM-less UTF-32: if both
+UTF-32LE and UTF-32BE strictly decode the whole file, LEN reports
+`AmbiguousBomlessUtf32` and leaves the file unchanged.
+
+In practice this refusal is rare to the point of being close to
+theoretical. Every line separator LEN recognizes (CR, LF, NEL, LS, PS) is a
+small scalar value, and a 4-byte UTF-32 group that encodes one of them
+always pushes the *opposite* byte order's value for that same group outside
+the valid `U+0000`-`U+10FFFF` range. A file therefore cannot both need line
+ending conversion and be genuinely ambiguous between the two byte orders at
+the same time - if it needs conversion, the opposite order already fails to
+decode, and this guard has nothing to add. It still exists so a BOM-less
+UTF-32 file that manages to be ambiguous is never rewritten under an
+unproven byte order, matching the same conservative rule as UTF-16.
+
 ## Legacy files
 
 LEN does not decode and re-encode legacy text. It copies all bytes unchanged
