@@ -20,10 +20,10 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Restore
-        run: dotnet restore LineEndingNormalizer.slnx
+        run: dotnet restore sources\LineEndingNormalizer.slnx
 
       - name: Build
-        run: dotnet build LineEndingNormalizer.slnx --configuration Release --no-restore
+        run: dotnet build sources\LineEndingNormalizer.slnx --configuration Release --no-restore
 
       - name: Test
-        run: dotnet test LineEndingNormalizer.slnx --configuration Release --no-build
+        run: dotnet test sources\LineEndingNormalizer.slnx --configuration Release --no-build
