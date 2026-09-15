@@ -114,19 +114,31 @@ LineEndingNormalizer-1.6.0-win-x64-self-contained.zip
   sha256:b3c174f05a779290e6db691b283bd5b29c3a1fceb5b535f3fb5b27181f63fb1c
 ```
 
-**The executables inside were not independently reproduced this release.**
-Rebuilding both from a clean checkout of this same commit, on the same SDK
+**The executables reproduce byte-for-byte once the checkout path matches.**
+An initial rebuild from a clean checkout of this same commit, on the same SDK
 (10.0.401) and runtime (10.0.12) the release workflow used, produced files of
-identical size but not identical bytes: exactly 160 bytes differ in each
-executable, regardless of the executable's total size (561,606 bytes for the
-framework-dependent build; 73,915,555 for the self-contained one). The
-constant, size-independent difference count points at the single-file bundle
-header rather than the compiled managed code, but the cause was not isolated.
-EncodingChecker's executables reproduced byte-for-byte from a clean checkout
-twice this same session under the same tooling, so this is not assumed to be
-inherent to .NET single-file publishing in general — it is recorded as an
-open question for this release rather than asserted as safe. The archive
-digest match above is what this record actually rests on.
+identical size but not identical bytes: exactly 160 bytes differed in each
+executable, regardless of the executable's total size. Diffing the two
+executables byte-by-byte traced every difference to one location: the
+compiler-generated support class for `FilePatternMatcher.cs`'s
+`[GeneratedRegex]` attribute embeds a hash of the source file's absolute
+path in its generated type name, so building from a different checkout
+directory than the release workflow used changes those bytes without
+changing behavior. Rebuilding from `D:\a\LineEndingNormalizer\LineEndingNormalizer`
+— the default GitHub-hosted Windows runner workspace path — reproduced both
+published executables exactly:
+
+```
+framework-dependent  published  ae9d26c5b31a0090a9769d736f9d855376019278c09ace4f0852bc1990ad3caa
+                     rebuilt    ae9d26c5b31a0090a9769d736f9d855376019278c09ace4f0852bc1990ad3caa
+self-contained       published  057c8ce19436f999f16789fb4adc2203281bb2ee525ac1cb0ab403bd86c3a0db
+                     rebuilt    057c8ce19436f999f16789fb4adc2203281bb2ee525ac1cb0ab403bd86c3a0db
+```
+
+Reproducing this build therefore requires checking out to that exact path
+(or wherever the release workflow itself runs), not merely the same source,
+SDK, and runtime — a limitation specific to `[GeneratedRegex]`'s naming
+scheme, not to single-file publishing.
 
 These are the archives, not the assembly inside them. The release workflow
 refuses to publish unless the git tag, the project version, and the application
@@ -146,9 +158,8 @@ Parity proves the three copies agree, not that they are correct. Three
 identical copies of a wrong detector would pass it.
 
 **What is still unmeasured for this release.** Everything listed under
-v1.5.0's "still unmeasured" remains true, plus: the executable-reproducibility
-gap noted above, and no filesystem-level exercise of the new UTF-32 guard
-(its regression tests call the internal guard directly, since a file cannot
-both need conversion and be genuinely byte-order-ambiguous under UTF-32 — see
-[SAFETY.md](SAFETY.md) and [RELEASE-NOTES-v1.6.0.md](RELEASE-NOTES-v1.6.0.md)
-for why).
+v1.5.0's "still unmeasured" remains true, plus: no filesystem-level exercise
+of the new UTF-32 guard (its regression tests call the internal guard
+directly, since a file cannot both need conversion and be genuinely
+byte-order-ambiguous under UTF-32 — see [SAFETY.md](SAFETY.md) and
+[RELEASE-NOTES-v1.6.0.md](RELEASE-NOTES-v1.6.0.md) for why).
