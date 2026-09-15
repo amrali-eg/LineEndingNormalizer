@@ -1495,17 +1495,8 @@ internal static class LosslessFileWriter
                     IntPtr.Zero,
                     IntPtr.Zero);
         }
-        catch (DllNotFoundException)
-        {
-            // Fall back only when the API is unavailable.
-            File.Move(
-                source,
-                destination,
-                overwrite: true);
-
-            return;
-        }
-        catch (EntryPointNotFoundException)
+        catch (Exception ex) when (
+            ex is DllNotFoundException or EntryPointNotFoundException)
         {
             // Fall back only when the API is unavailable.
             File.Move(
