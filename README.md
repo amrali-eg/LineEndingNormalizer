@@ -108,8 +108,8 @@ self-contained build from the
 To build locally:
 
 ```powershell
-dotnet build LineEndingNormalizer.slnx --configuration Release
-dotnet test LineEndingNormalizer.slnx --configuration Release
+dotnet build sources\LineEndingNormalizer.slnx --configuration Release
+dotnet test sources\LineEndingNormalizer.slnx --configuration Release
 ```
 
 ## Related projects

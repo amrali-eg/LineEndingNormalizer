@@ -25,7 +25,7 @@ jobs:
         shell: pwsh
         run: |
           $ec = Get-Content 'encoding-checker/sources/EncodingChecker/UnicodeDetector.cs' -Raw
-          $len = Get-Content 'line-ending-normalizer/UnicodeDetector.cs' -Raw
+          $len = Get-Content 'line-ending-normalizer/sources/LineEndingNormalizer/UnicodeDetector.cs' -Raw
           $ec = $ec -replace 'namespace EncodingChecker;', 'namespace SharedUnicodeDetector;'
           $len = $len -replace 'namespace LineEndingNormalizer;', 'namespace SharedUnicodeDetector;'
           $ec = [regex]::Replace($ec, "`r?`n", "`n").TrimStart([char]0xFEFF)
