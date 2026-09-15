@@ -25,6 +25,32 @@ internal static class LosslessFileWriter
     /// </summary>
     internal const string TempFileSuffix = "len.tmp";
 
+    /// <summary>
+    /// Builds a temporary sibling file name sharing <paramref name="path"/>'s
+    /// directory placement and exclusion suffix, so both the conversion temp
+    /// file and the backup temp file are recognized the same way by
+    /// directory-traversal scans and are identifiable if abandoned.
+    /// </summary>
+    private static string BuildTempFileName(
+        string directory,
+        string path,
+        string? infix)
+    {
+        string infixSegment =
+            infix is null
+                ? ""
+                : infix + ".";
+
+        return Path.Combine(
+            directory,
+            Path.GetFileName(path) +
+            "." +
+            Guid.NewGuid().ToString("N")[..12] +
+            "." +
+            infixSegment +
+            TempFileSuffix);
+    }
+
     private sealed record WriteResult(
         byte[] VerificationHash,
         byte[] SourceSha256);
@@ -84,13 +110,10 @@ internal static class LosslessFileWriter
 
             // Keep abandoned temp files identifiable and short.
             string tempPath =
-                Path.Combine(
+                BuildTempFileName(
                     directory,
-                    Path.GetFileName(path) +
-                    "." +
-                    Guid.NewGuid().ToString("N")[..12] +
-                    "." +
-                    TempFileSuffix);
+                    path,
+                    infix: null);
 
             byte[] preamble =
                 encoding.GetPreamble();
@@ -445,13 +468,10 @@ internal static class LosslessFileWriter
         // future scans by the same directory-traversal rule as .len.tmp,
         // rather than needing a second dedicated exclusion.
         string backupTempPath =
-            Path.Combine(
+            BuildTempFileName(
                 directory,
-                Path.GetFileName(path) +
-                "." +
-                Guid.NewGuid().ToString("N")[..12] +
-                ".bak." +
-                TempFileSuffix);
+                path,
+                infix: "bak");
 
         try
         {
@@ -1495,17 +1515,8 @@ internal static class LosslessFileWriter
                     IntPtr.Zero,
                     IntPtr.Zero);
         }
-        catch (DllNotFoundException)
-        {
-            // Fall back only when the API is unavailable.
-            File.Move(
-                source,
-                destination,
-                overwrite: true);
-
-            return;
-        }
-        catch (EntryPointNotFoundException)
+        catch (Exception ex) when (
+            ex is DllNotFoundException or EntryPointNotFoundException)
         {
             // Fall back only when the API is unavailable.
             File.Move(

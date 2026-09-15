@@ -175,18 +175,22 @@ internal static class Program
                 "Target    : {0}",
                 options.TargetLineEnding.ToString().ToUpperInvariant());
 
-            if (mode == ProcessingMode.WhatIf)
+            string? modeLine =
+                mode switch
+                {
+                    ProcessingMode.WhatIf =>
+                        "Mode      : Preview only (no files will be modified)",
+
+                    ProcessingMode.ValidateOnly =>
+                        "Mode      : Validate only (no files will be modified)",
+
+                    _ => null
+                };
+
+            if (modeLine != null)
             {
                 Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine(
-                    "Mode      : Preview only (no files will be modified)");
-                Console.ResetColor();
-            }
-            else if (mode == ProcessingMode.ValidateOnly)
-            {
-                Console.ForegroundColor = ConsoleColor.Yellow;
-                Console.WriteLine(
-                    "Mode      : Validate only (no files will be modified)");
+                Console.WriteLine(modeLine);
                 Console.ResetColor();
             }
 
