@@ -53,20 +53,25 @@ selected source encoding before retrying.
 
 ### BOM-less UTF-32
 
-The same opposite-byte-order check applies to BOM-less UTF-32: if both
-UTF-32LE and UTF-32BE strictly decode the whole file, LEN reports
-`AmbiguousBomlessUtf32` and leaves the file unchanged.
+BOM-less UTF-32 is refused unconditionally: LEN reports `UnprovableBomlessUtf32`
+and leaves the file unchanged, regardless of whether the opposite byte order
+also decodes.
 
-In practice this refusal is rare to the point of being close to
-theoretical. Every line separator LEN recognizes (CR, LF, NEL, LS, PS) is a
-small scalar value, and a 4-byte UTF-32 group that encodes one of them
-always pushes the *opposite* byte order's value for that same group outside
-the valid `U+0000`-`U+10FFFF` range. A file therefore cannot both need line
-ending conversion and be genuinely ambiguous between the two byte orders at
-the same time - if it needs conversion, the opposite order already fails to
-decode, and this guard has nothing to add. It still exists so a BOM-less
-UTF-32 file that manages to be ambiguous is never rewritten under an
-unproven byte order, matching the same conservative rule as UTF-16.
+An opposite-byte-order test - the check used for UTF-16 above - is not enough
+here. A BOM-less UTF-16 file with one character per line puts a C0 control
+(the line separator) in every second code unit; grouped into 4-byte units,
+each group is an in-range, unassigned UTF-32 scalar, so the file is detected
+as BOM-less UTF-32LE. The *opposite* UTF-32 order correctly fails to decode
+that same file - so an opposite-order test would call it "unambiguous" and
+rewrite it as UTF-32 text, destroying the real UTF-16 content under the wrong
+codec entirely. What cannot be proven here is the codec itself, not merely
+its byte order, so LEN refuses every BOM-less UTF-32 file rather than trying
+to rule out that one case specifically.
+
+The cost is real: ordinary, unambiguous BOM-less UTF-32 is refused too, with
+no override. LEN has no source-encoding flag - EncodingChecker's `-From`
+equivalent - so unlike EncodingChecker there is no documented way through
+this refusal short of adding a byte-order mark to the file.
 
 ## Legacy files
 

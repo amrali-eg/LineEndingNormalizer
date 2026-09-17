@@ -4,8 +4,8 @@ using System.Text;
 namespace LineEndingNormalizer;
 
 /// <summary>
-/// Prevents destructive normalization when BOM-less UTF-16 or UTF-32 byte
-/// order cannot be established from the bytes alone.
+/// Prevents destructive normalization when a BOM-less Unicode file's codec or
+/// byte order cannot be established from the bytes alone.
 /// </summary>
 internal static class BomlessUnicodeSafety
 {
@@ -14,20 +14,28 @@ internal static class BomlessUnicodeSafety
     internal const string AmbiguousReasonCode =
         "AmbiguousBomlessUtf16";
 
-    internal const string AmbiguousUtf32ReasonCode =
-        "AmbiguousBomlessUtf32";
-
-    // Both families use adjacent .NET code pages for the little- and
-    // big-endian variant (1200/1201, 12000/12001), so one offset works for
-    // either.
-    private const int BigEndianOffset = 1;
+    internal const string UnprovableUtf32ReasonCode =
+        "UnprovableBomlessUtf32";
 
     /// <summary>
-    /// Refuses conversion when the same bytes are valid under the opposite
-    /// UTF-16 or UTF-32 byte order. Detection may still report its preferred
-    /// byte order, but that preference is not enough to justify rewriting
-    /// the file.
+    /// Refuses conversion when a BOM-less file's codec or byte order is not
+    /// provable from its bytes.
     /// </summary>
+    /// <remarks>
+    /// UTF-16 is refused only when the opposite byte order also strictly
+    /// decodes the whole file, because otherwise the bytes do establish the
+    /// order. Detection may still report its preferred byte order, but that
+    /// preference is not enough to justify rewriting the file.
+    ///
+    /// UTF-32 is refused whenever no BOM is present; an opposite-order test
+    /// would not do. A BOM-less UTF-16 file with one character per line puts
+    /// a C0 control in every second code unit, so each resulting four-byte
+    /// group is an in-range unassigned scalar and the file decodes as
+    /// UTF-32LE, while the *opposite* UTF-32 order rejects it - an
+    /// opposite-order test would wave that file through as unambiguous and
+    /// rewrite it under the wrong codec entirely. What cannot be proven is
+    /// the codec, not merely its byte order.
+    /// </remarks>
     internal static void EnsureSafeToNormalize(
         Stream source,
         DetectResult detection,
@@ -43,43 +51,30 @@ internal static class BomlessUnicodeSafety
 
         switch (detection.Encoding.CodePage)
         {
-            case 1200 or 1201:
-                EnsureSafeAgainstOppositeByteOrder(
-                    source,
-                    detection,
-                    cancellationToken,
-                    littleEndianCodePage: 1200,
-                    familyName: "UTF-16",
-                    reasonCode: AmbiguousReasonCode);
-                return;
-
             case 12000 or 12001:
-                EnsureSafeAgainstOppositeByteOrder(
-                    source,
-                    detection,
-                    cancellationToken,
-                    littleEndianCodePage: 12000,
-                    familyName: "UTF-32",
-                    reasonCode: AmbiguousUtf32ReasonCode);
+                throw new ConversionRefusedException(
+                    UnprovableUtf32ReasonCode,
+                    "Refusing to normalize BOM-less UTF-32: the codec cannot be proven from " +
+                    "the bytes alone. Add a byte-order mark to identify it.");
+
+            case 1200 or 1201:
+                EnsureUtf16ByteOrderIsUnambiguous(source, detection, cancellationToken);
                 return;
         }
     }
 
-    private static void EnsureSafeAgainstOppositeByteOrder(
+    private static void EnsureUtf16ByteOrderIsUnambiguous(
         Stream source,
         DetectResult detection,
-        CancellationToken cancellationToken,
-        int littleEndianCodePage,
-        string familyName,
-        string reasonCode)
+        CancellationToken cancellationToken)
     {
-        int bigEndianCodePage =
-            littleEndianCodePage + BigEndianOffset;
+        const int LittleEndian = 1200;
+        const int BigEndian = 1201;
 
         int oppositeCodePage =
-            detection.Encoding.CodePage == littleEndianCodePage
-                ? bigEndianCodePage
-                : littleEndianCodePage;
+            detection.Encoding.CodePage == LittleEndian
+                ? BigEndian
+                : LittleEndian;
 
         if (!CanDecodeStrictly(
                 source,
@@ -90,18 +85,18 @@ internal static class BomlessUnicodeSafety
         }
 
         string detectedName =
-            detection.Encoding.CodePage == littleEndianCodePage
-                ? $"{familyName}LE"
-                : $"{familyName}BE";
+            detection.Encoding.CodePage == LittleEndian
+                ? "UTF-16LE"
+                : "UTF-16BE";
 
         string oppositeName =
-            oppositeCodePage == littleEndianCodePage
-                ? $"{familyName}LE"
-                : $"{familyName}BE";
+            oppositeCodePage == LittleEndian
+                ? "UTF-16LE"
+                : "UTF-16BE";
 
         throw new ConversionRefusedException(
-            reasonCode,
-            $"Refusing to normalize BOM-less {familyName} because the bytes are valid as both {detectedName} and {oppositeName}. " +
+            AmbiguousReasonCode,
+            $"Refusing to normalize BOM-less UTF-16 because the bytes are valid as both {detectedName} and {oppositeName}. " +
             "Add a byte-order mark or use a tool that lets you explicitly confirm the source byte order.");
     }
 

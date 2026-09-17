@@ -177,69 +177,8 @@ public sealed class LosslessFileWriterTests
         Assert.False(File.Exists(path + ".bak"));
     }
 
-    /// <summary>
-    /// BomlessUnicodeSafety.EnsureSafeToNormalize's UTF-32 branch cannot be
-    /// reached through NewLineNormalizer.NormalizeFile the way the UTF-16
-    /// branch's tests reach it above: RequiresConversion needs a real
-    /// separator (CR, LF, or a Unicode line/paragraph separator), and every
-    /// one of those is a small value whose 4-byte encoding has a non-zero
-    /// low-order byte in the position that must be zero for the *other*
-    /// byte order to stay within the valid scalar range (0..0x10FFFF).
-    /// Embedding a real separator in one order therefore always makes the
-    /// opposite order's full-file decode fail on that exact group, which
-    /// means a file cannot simultaneously (a) need conversion and (b) be
-    /// genuinely ambiguous between UTF-32LE and UTF-32BE. So this calls the
-    /// (internal) guard directly with a constructed DetectResult instead of
-    /// going through the file-based pipeline.
-    /// </summary>
-    [Fact]
-    public void EnsureSafeToNormalize_Utf32_WhenOppositeByteOrderAlsoDecodes_Refuses()
-    {
-        // U+10200 repeated. Its big-endian bytes are 00 01 02 00; read back as
-        // little-endian, those same bytes are U+20100 -- a different valid,
-        // non-surrogate scalar, so both orders strictly decode the whole file.
-        string text =
-            string.Concat(
-                Enumerable.Repeat(char.ConvertFromUtf32(0x10200), 20));
-
-        byte[] source =
-            new UTF32Encoding(bigEndian: true, byteOrderMark: false)
-                .GetBytes(text);
-
-        using var stream = new MemoryStream(source);
-
-        var detection = new DetectResult(
-            UnicodeDetector.Utf32LittleEndianNoBom,
-            HasBom: false,
-            LineEndingKind.None);
-
-        var ex = Assert.Throws<ConversionRefusedException>(() =>
-            BomlessUnicodeSafety.EnsureSafeToNormalize(stream, detection));
-
-        Assert.Equal(BomlessUnicodeSafety.AmbiguousUtf32ReasonCode, ex.ReasonCode);
-    }
-
-    [Fact]
-    public void EnsureSafeToNormalize_Utf32_WhenOppositeByteOrderIsInvalid_DoesNotThrow()
-    {
-        // "A" repeated: 0x41 in every group. Big-endian bytes are 00 00 00 41;
-        // read as little-endian that is 0x41000000, far above U+10FFFF, so the
-        // opposite order cannot decode and the file is not actually ambiguous.
-        string text = string.Concat(Enumerable.Repeat('A', 20));
-
-        byte[] source =
-            new UTF32Encoding(bigEndian: true, byteOrderMark: false)
-                .GetBytes(text);
-
-        using var stream = new MemoryStream(source);
-
-        var detection = new DetectResult(
-            UnicodeDetector.Utf32BigEndianNoBom,
-            HasBom: false,
-            LineEndingKind.None);
-
-        BomlessUnicodeSafety.EnsureSafeToNormalize(stream, detection);
-    }
+    // BOM-less UTF-32 refusal coverage lives in BomlessUtf32RefusalTests.cs,
+    // ported from EncodingChecker's suite of the same name.
 
     [Fact]
     public void BomLessUtf16LE_WhenOppositeByteOrderIsInvalid_StillConverts()
