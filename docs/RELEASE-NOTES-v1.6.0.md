@@ -1,5 +1,17 @@
 # LineEndingNormalizer v1.6.0
 
+**Correction (added in v1.7.0):** the Safety section below describes and this
+version genuinely ships an opposite-byte-order ambiguity test for BOM-less
+UTF-32, reporting `AmbiguousBomlessUtf32`. That test is insufficient: a
+BOM-less UTF-16 file can misdetect as UTF-32 and pass this check, because the
+opposite UTF-32 order need not fail to decode a file that is not really
+UTF-32 at all. **v1.6.0 as published can convert such a file, silently
+corrupting it.** v1.7.0 replaces this with an unconditional refusal
+(`UnprovableBomlessUtf32`) that closes the gap; see
+[SAFETY.md](SAFETY.md#bom-less-utf-32) and
+[RELEASE-NOTES-v1.7.0.md](RELEASE-NOTES-v1.7.0.md). This file is left
+otherwise unedited as a historical record of what was intended at the time.
+
 Adds one narrow new safety refusal, closes a test-coverage gap in the existing
 backup verification, updates the legacy-detection dependency, and reorganizes
 the repository into the same `sources/` layout EncodingChecker already uses.
