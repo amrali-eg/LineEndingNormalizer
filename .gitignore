@@ -264,8 +264,8 @@ publish/
 # but database connection strings (with potential passwords) will be unencrypted
 *.pubxml
 # Used by the release workflow; contains no secrets.
-!Properties/PublishProfiles/FolderProfile.pubxml
-!Properties/PublishProfiles/SelfContainedRelease.pubxml
+!sources/LineEndingNormalizer/Properties/PublishProfiles/FolderProfile.pubxml
+!sources/LineEndingNormalizer/Properties/PublishProfiles/SelfContainedRelease.pubxml
 *.publishproj
 
 # Microsoft Azure Web App publish settings. Comment the next line if you want to
@@ -440,3 +440,6 @@ MigrationBackup/
 .ionide/
 
 # End of https://www.toptal.com/developers/gitignore/api/visualstudio,visualstudiocode,windows,linux,macos
+
+# Claude Code local settings: machine-specific permission overrides, never shared.
+**/.claude/settings.local.json
