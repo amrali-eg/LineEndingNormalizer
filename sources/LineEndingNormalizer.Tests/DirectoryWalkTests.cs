@@ -79,4 +79,87 @@ public sealed class DirectoryWalkTests
         Assert.NotNull(result);
         Assert.Equal(2, result.Count);
     }
+
+    /// <summary>
+    /// An unreadable directory used to leave a warning on stderr and nothing
+    /// else: no counter, exit 0. A run that never saw part of the tree could
+    /// report success. The counter closes that gap.
+    /// </summary>
+    [Fact]
+    public void UnlistableRoot_IsCountedAsDirectoriesUnreadable()
+    {
+        string ghostRoot = Path.Combine(
+            Path.GetTempPath(),
+            "len-tests-ghost-" + Guid.NewGuid().ToString("N"));
+
+        var statistics = new Statistics();
+
+        var found = DirectoryTraversal.EnumerateCandidateFiles(
+            ghostRoot,
+            statistics: statistics).ToList();
+
+        // The walk tries to list subdirectories and files independently for
+        // each directory, so a root that does not exist fails both listings.
+        Assert.Empty(found);
+        Assert.Equal(2, statistics.DirectoriesUnreadable);
+    }
+
+    [Fact]
+    public void TryEnumerate_CountsDirectoriesUnreadable_OnFailure()
+    {
+        string ghost = Path.Combine(
+            Path.GetTempPath(),
+            "len-tests-ghost-" + Guid.NewGuid().ToString("N"));
+
+        var statistics = new Statistics();
+
+        List<string>? result = DirectoryTraversal.TryEnumerate(
+            ghost,
+            Directory.EnumerateFiles,
+            statistics: statistics);
+
+        Assert.Null(result);
+        Assert.Equal(1, statistics.DirectoriesUnreadable);
+    }
+
+    /// <summary>
+    /// A folder skipped by reserved name (.git, bin, obj, ...) was silent:
+    /// its contents were never counted anywhere. This keeps the exclusion
+    /// visible without changing that it is skipped.
+    /// </summary>
+    [Fact]
+    public void ReservedNameDirectory_IsCountedAsDirectoriesSkippedByName()
+    {
+        using var dir = new TempDirectory();
+
+        dir.WriteFile("keep/a.txt", [.. "a"u8]);
+        dir.WriteFile(".git/HEAD", [.. "ref"u8]);
+        dir.WriteFile("bin/Debug/out.dll", [.. "x"u8]);
+
+        var statistics = new Statistics();
+
+        var found = DirectoryTraversal.EnumerateCandidateFiles(
+            dir.Path,
+            statistics: statistics).ToList();
+
+        Assert.Single(found);
+        Assert.Equal(2, statistics.DirectoriesSkippedByName);
+    }
+
+    [Fact]
+    public void AccessibleTreeWithNoExclusions_ReportsZeroForBothCounters()
+    {
+        using var dir = new TempDirectory();
+
+        dir.WriteFile("a.txt", [.. "x"u8]);
+
+        var statistics = new Statistics();
+
+        DirectoryTraversal.EnumerateCandidateFiles(
+            dir.Path,
+            statistics: statistics).ToList();
+
+        Assert.Equal(0, statistics.DirectoriesUnreadable);
+        Assert.Equal(0, statistics.DirectoriesSkippedByName);
+    }
 }
