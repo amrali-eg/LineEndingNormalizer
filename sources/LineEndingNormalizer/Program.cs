@@ -128,6 +128,14 @@ internal static class Program
             return ExitReparsePointRoot;
         }
 
+        string? reportPathError = FindUnusableReportDestination(options);
+
+        if (reportPathError is not null)
+        {
+            Console.Error.WriteLine(reportPathError);
+            return ExitProcessingErrors;
+        }
+
         using var cancellation = new CancellationTokenSource();
 
         ConsoleCancelEventHandler cancelHandler = (_, e) =>
@@ -552,6 +560,50 @@ internal static class Program
             ],
             StringSplitOptions.RemoveEmptyEntries |
             StringSplitOptions.TrimEntries);
+    }
+
+    /// <summary>Returns the reason -Report's path is unusable, if it is.</summary>
+    /// <remarks>
+    /// Ported from EncodingChecker's BL-22 fix. Checked before any file is
+    /// touched: a missing parent directory or a path that names an existing
+    /// directory used to surface only after every source file had already
+    /// been rewritten, leaving the requested report absent regardless. Does
+    /// not probe by creating a file - that would leave an artifact behind on
+    /// its own, and could not promise the later write will succeed anyway.
+    /// </remarks>
+    private static string? FindUnusableReportDestination(Options options)
+    {
+        if (string.IsNullOrWhiteSpace(options.Report))
+        {
+            return null;
+        }
+
+        string fullPath;
+
+        try
+        {
+            fullPath = Path.GetFullPath(options.Report);
+        }
+        catch (Exception ex) when (
+            ex is IOException or ArgumentException or NotSupportedException)
+        {
+            return $"-Report contains an invalid path: {ex.Message}";
+        }
+
+        if (Directory.Exists(fullPath))
+        {
+            return "-Report names an existing directory. Give it a file path.";
+        }
+
+        string? parent = Path.GetDirectoryName(fullPath);
+
+        if (!string.IsNullOrEmpty(parent) && !Directory.Exists(parent))
+        {
+            return $"-Report is under '{parent}', which does not exist. Create it "
+                   + "first, or choose a path whose folder already exists.";
+        }
+
+        return null;
     }
 
     /// <summary>

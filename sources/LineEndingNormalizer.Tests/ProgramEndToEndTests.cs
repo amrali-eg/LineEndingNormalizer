@@ -475,4 +475,98 @@ public sealed class ProgramEndToEndTests
             stdout);
         Assert.Contains("Usage:", stdout);
     }
+
+    /// <summary>
+    /// Ported from EncodingChecker's BL-22 fix: an unwritable -Report path
+    /// used to be discovered only after every file had already been
+    /// converted, leaving the requested report absent regardless. It must
+    /// now fail before any file is touched.
+    /// </summary>
+    [Fact]
+    public void UnwritableReportPath_IsRejectedBeforeAnyFileIsConverted()
+    {
+        using var dir = new TempDirectory();
+
+        string sourcePath =
+            dir.WriteFile("needsconvert.txt", Encoding.ASCII.GetBytes("a\nb\n"));
+
+        byte[] before = File.ReadAllBytes(sourcePath);
+
+        // A path under a directory that does not exist.
+        string reportPath = dir.CombinePath(
+            "no-such-folder/report.csv");
+
+        int exitCode = RunMain(
+            ["-BasePath", dir.Path, "-Target", "CRLF", "-Report", reportPath],
+            out _,
+            out string stderr);
+
+        Assert.Equal(3, exitCode);
+        Assert.Equal(before, File.ReadAllBytes(sourcePath));
+        Assert.False(File.Exists(reportPath));
+        Assert.Contains("-Report", stderr);
+    }
+
+    [Fact]
+    public void ReportPathNamingAnExistingDirectory_IsRejectedBeforeAnyFileIsConverted()
+    {
+        using var dir = new TempDirectory();
+
+        string sourcePath =
+            dir.WriteFile("needsconvert.txt", Encoding.ASCII.GetBytes("a\nb\n"));
+
+        byte[] before = File.ReadAllBytes(sourcePath);
+
+        string reportPath = dir.CombinePath("report-is-a-folder");
+        Directory.CreateDirectory(reportPath);
+
+        int exitCode = RunMain(
+            ["-BasePath", dir.Path, "-Target", "CRLF", "-Report", reportPath],
+            out _,
+            out string stderr);
+
+        Assert.Equal(3, exitCode);
+        Assert.Equal(before, File.ReadAllBytes(sourcePath));
+        Assert.Contains("existing directory", stderr);
+    }
+
+    [Fact]
+    public void UnwritableReportPath_IsRejectedBeforeDetectOnlyRunsEither()
+    {
+        using var dir = new TempDirectory();
+
+        dir.WriteFile("a.txt", Encoding.ASCII.GetBytes("a\nb\n"));
+
+        string reportPath = dir.CombinePath("no-such-folder/report.csv");
+
+        int exitCode = RunMain(
+            ["-BasePath", dir.Path, "-DetectOnly", "-Report", reportPath],
+            out string stdout,
+            out string stderr);
+
+        Assert.Equal(3, exitCode);
+
+        // Preflight runs before DetectOnly prints its CSV header, so no
+        // per-file detection output should appear either.
+        Assert.DoesNotContain("a.txt", stdout);
+        Assert.Contains("-Report", stderr);
+    }
+
+    [Fact]
+    public void ValidReportPath_StillConvertsNormally()
+    {
+        using var dir = new TempDirectory();
+
+        dir.WriteFile("needsconvert.txt", Encoding.ASCII.GetBytes("a\nb\n"));
+
+        string reportPath = dir.CombinePath("report.csv");
+
+        int exitCode = RunMain(
+            ["-BasePath", dir.Path, "-Target", "CRLF", "-Report", reportPath],
+            out _,
+            out _);
+
+        Assert.Equal(0, exitCode);
+        Assert.True(File.Exists(reportPath));
+    }
 }
