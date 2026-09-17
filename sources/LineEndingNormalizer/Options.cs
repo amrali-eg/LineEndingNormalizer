@@ -1,4 +1,4 @@
-﻿namespace LineEndingNormalizer;
+namespace LineEndingNormalizer;
 
 /// <summary>
 /// Command-line options.

@@ -1,4 +1,4 @@
-﻿namespace LineEndingNormalizer;
+namespace LineEndingNormalizer;
 
 /// <summary>
 /// Detects encodings and normalizes line endings while preserving

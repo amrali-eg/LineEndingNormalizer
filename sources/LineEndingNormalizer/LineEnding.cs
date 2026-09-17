@@ -1,4 +1,4 @@
-﻿namespace LineEndingNormalizer;
+namespace LineEndingNormalizer;
 
 /// <summary>
 /// Supported output line-ending styles.

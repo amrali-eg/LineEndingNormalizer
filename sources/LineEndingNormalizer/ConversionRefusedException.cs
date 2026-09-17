@@ -1,4 +1,4 @@
-﻿namespace LineEndingNormalizer;
+namespace LineEndingNormalizer;
 
 /// <summary>
 /// Identifies a file that LEN deliberately left unchanged because conversion
