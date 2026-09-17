@@ -1,4 +1,5 @@
-﻿using System.Diagnostics.CodeAnalysis;
+﻿using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -1351,16 +1352,17 @@ internal static class Program
         IReadOnlyList<string> rows,
         out string? errorMessage)
     {
-        try
+        errorMessage = WriteArtifactAtomically(path, stream =>
         {
             using var writer =
                 new StreamWriter(
-                    path,
-                    append: false,
+                    stream,
                     new UTF8Encoding(
-                        encoderShouldEmitUTF8Identifier: false));
-
-            writer.NewLine = "\r\n";
+                        encoderShouldEmitUTF8Identifier: false),
+                    leaveOpen: true)
+                {
+                    NewLine = "\r\n"
+                };
 
             writer.WriteLine(header);
 
@@ -1368,20 +1370,77 @@ internal static class Program
             {
                 writer.WriteLine(row);
             }
+        });
 
-            errorMessage = null;
+        return errorMessage is null;
+    }
 
-            return true;
+    /// <summary>
+    /// Writes an artifact (currently only the -Report CSV) without replacing
+    /// a previous one until its successor is complete.
+    /// </summary>
+    /// <returns><see langword="null"/> on success; otherwise, a diagnostic.</returns>
+    /// <remarks>
+    /// Ported from EncodingChecker's BL-24 fix (<c>AtomicArtifactFile</c>).
+    /// Writes a complete temporary file beside the destination and replaces
+    /// the old one only after that write succeeds, instead of truncating the
+    /// destination in place: a failed write used to erase whatever report
+    /// was already there.
+    /// </remarks>
+    internal static string? WriteArtifactAtomically(
+        string path,
+        Action<Stream> writeContent)
+    {
+        string fullPath = Path.GetFullPath(path);
+
+        string tempPath =
+            $"{fullPath}.{Guid.NewGuid():N}.{LosslessFileWriter.TempFileSuffix}";
+
+        try
+        {
+            using (var stream = new FileStream(
+                       tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                writeContent(stream);
+
+                stream.Flush();
+
+                // Flush to disk before installation so a power loss cannot
+                // expose an empty or half-written artifact.
+                stream.Flush(flushToDisk: true);
+            }
+
+            LosslessFileWriter.AtomicReplace(tempPath, fullPath);
+
+            return null;
         }
         catch (Exception ex) when (
             ex is IOException or
             UnauthorizedAccessException or
             ArgumentException or
-            NotSupportedException)
-        {
-            errorMessage = ex.Message;
+            NotSupportedException or
+            InvalidOperationException or
 
-            return false;
+            // Thrown by AtomicReplace when Windows ReplaceFile fails
+            // (e.g. a sharing violation on the destination).
+            Win32Exception)
+        {
+            return ex.Message;
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(tempPath))
+                {
+                    File.Delete(tempPath);
+                }
+            }
+            catch (Exception ex) when (
+                ex is IOException or UnauthorizedAccessException)
+            {
+                // Cleanup failure cannot invalidate an artifact already installed.
+            }
         }
     }
 

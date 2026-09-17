@@ -1465,7 +1465,7 @@ internal static class LosslessFileWriter
     /// <summary>
     /// Atomically replaces the destination where supported.
     /// </summary>
-    private static void AtomicReplace(
+    internal static void AtomicReplace(
         string source,
         string destination)
     {
