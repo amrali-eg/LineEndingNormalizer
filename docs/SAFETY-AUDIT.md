@@ -169,3 +169,69 @@ of the new UTF-32 guard (its regression tests call the internal guard
 directly, since a file cannot both need conversion and be genuinely
 byte-order-ambiguous under UTF-32 — see [SAFETY.md](SAFETY.md) and
 [RELEASE-NOTES-v1.6.0.md](RELEASE-NOTES-v1.6.0.md) for why).
+
+### v1.7.0 — not corpus-audited
+
+**No corpus run has been performed against LEN.** As with v1.5.0 and v1.6.0,
+detection results carry over through detector parity with EncodingChecker,
+verified below. This release fixes the v1.6.0 UTF-32 gap recorded above,
+adds a preflight check and atomic write for `-Report`, and adds two
+directory-coverage counters to the run summary; all rest on the regression
+suite, not on corpus measurement.
+
+```
+commit    8c31fed98281d70a13c6bf22f58b28d19e9beeaf   (tag v1.7.0)
+project   1.7.0     manifest 1.7.0.0     binary reports 1.7.0
+tests     316 passed, 0 failed
+build     0 warnings
+```
+
+Published archives, digests verified against a local download rather than
+trusting GitHub's own report of them — and confirmed to equal what GitHub
+itself reports as each asset's digest:
+
+```
+LineEndingNormalizer-1.7.0-framework-dependent.zip
+  sha256:dc01dd0c07516454b0e6d4f7780358287e5c82cc526b464463e4efc0d7785e74
+LineEndingNormalizer-1.7.0-win-x64-self-contained.zip
+  sha256:628f51a014b4416511109efe3935b7dc5bbae15e3674ee8ada136e3e90824d7e
+```
+
+**The executables reproduce byte-for-byte, checked directly this time.**
+Learning applied from v1.6.0's investigation: rebuilt directly from a clean
+checkout at `D:\a\LineEndingNormalizer\LineEndingNormalizer` (the GitHub-hosted
+Windows runner workspace path `[GeneratedRegex]`'s path-derived naming
+requires), on the same SDK (10.0.401) and runtime (10.0.12) the release
+workflow used. Both executables matched the published archives' contents
+exactly on the first attempt:
+
+```
+framework-dependent  published  8c85ae0ac4a01b81d2ea9a80c9cf0fe67ab3cec3a5ad3615d32c140a25498e70
+                     rebuilt    8c85ae0ac4a01b81d2ea9a80c9cf0fe67ab3cec3a5ad3615d32c140a25498e70
+self-contained       published  00f74319f484a8db6304e673d070dc82c3bd88362a3f3adeef1334573483f5cf
+                     rebuilt    00f74319f484a8db6304e673d070dc82c3bd88362a3f3adeef1334573483f5cf
+```
+
+These are the archives, not the assembly inside them. The release workflow
+refuses to publish unless the git tag, the project version, and the application
+manifest agree.
+
+Detector parity at release, over three clean checkouts level with their
+remotes — `TextValidation.cs`, `UnicodeDetector.cs`, and `TextEncoding.Strict`
+identical across all three:
+
+```
+EncodingChecker        0002c44
+LineEndingNormalizer   8c31fed   (this release)
+CorpusTesters          d84158f
+```
+
+Parity proves the three copies agree, not that they are correct. Three
+identical copies of a wrong detector would pass it.
+
+**What is still unmeasured for this release.** Everything listed under
+v1.6.0's "still unmeasured" remains true. The new `-Report` preflight and
+atomic-write paths, and the two new directory-coverage counters, are
+end-to-end tested (real files, real CLI invocation via `Program.Main`) rather
+than only unit-level, and each was mutation-tested — but none of that is
+corpus measurement either.
