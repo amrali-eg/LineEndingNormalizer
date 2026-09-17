@@ -848,7 +848,7 @@ internal static class Program
         bool wantsReport = options.Report != null;
 
         FileOutcome[]? outcomes = ProcessFiles(
-            EnumerateCandidates(options),
+            EnumerateCandidates(options, statistics),
             options,
             cancellationToken,
             collectResults: wantsReport,
@@ -985,7 +985,8 @@ internal static class Program
     /// Candidate enumeration shared by Convert/Validate/WhatIf and DetectOnly.
     /// </summary>
     private static IEnumerable<string> EnumerateCandidates(
-        Options options)
+        Options options,
+        Statistics? statistics = null)
     {
         var includePatterns =
             FilePatternMatcher.Compile(
@@ -1002,7 +1003,8 @@ internal static class Program
                 onWarning: PrintTraversalWarning,
                 excludedFullPath: options.Report is null
                     ? null
-                    : Path.GetFullPath(options.Report))
+                    : Path.GetFullPath(options.Report),
+                statistics: statistics)
             .Where(file =>
                 DirectoryTraversal.IsCandidateFile(
                     Path.GetRelativePath(
@@ -1537,6 +1539,30 @@ internal static class Program
             "{0,-19}: {1,8}",
             "Failed",
             statistics.Errors);
+
+        // Shown only when it happened: a run that hit either of these has
+        // gaps in what it actually examined, even if every reached file was
+        // clean and the exit code says success.
+        if (statistics.DirectoriesUnreadable > 0)
+        {
+            Console.ForegroundColor =
+                ConsoleColor.Yellow;
+
+            Console.WriteLine(
+                "{0,-19}: {1,8}",
+                "Dirs unreadable",
+                statistics.DirectoriesUnreadable);
+
+            Console.ResetColor();
+        }
+
+        if (statistics.DirectoriesSkippedByName > 0)
+        {
+            Console.WriteLine(
+                "{0,-19}: {1,8}",
+                "Dirs skipped",
+                statistics.DirectoriesSkippedByName);
+        }
     }
 
     /// <summary>

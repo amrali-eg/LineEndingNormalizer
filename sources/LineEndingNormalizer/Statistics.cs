@@ -14,6 +14,8 @@ internal sealed class Statistics
     private int _skipped;
     private int _refused;
     private int _errors;
+    private int _directoriesUnreadable;
+    private int _directoriesSkippedByName;
 
     /// <summary>
     /// Gets the number of matching files processed.
@@ -46,6 +48,20 @@ internal sealed class Statistics
     /// Gets the number of files that could not be processed.
     /// </summary>
     public int Errors => _errors;
+
+    /// <summary>
+    /// Gets the number of directories that could not be listed. A run that
+    /// hit this is missing coverage even when every file it did reach was
+    /// clean, so a zero exit code alone cannot be trusted for completeness.
+    /// </summary>
+    public int DirectoriesUnreadable => _directoriesUnreadable;
+
+    /// <summary>
+    /// Gets the number of directories skipped by reserved name (.git, bin,
+    /// obj, and similar). Deliberate and documented, but silent otherwise -
+    /// this keeps that exclusion visible in the same coverage accounting.
+    /// </summary>
+    public int DirectoriesSkippedByName => _directoriesSkippedByName;
 
     /// <summary>
     /// Increments the number of processed files.
@@ -93,5 +109,21 @@ internal sealed class Statistics
     public void IncrementErrors()
     {
         Interlocked.Increment(ref _errors);
+    }
+
+    /// <summary>
+    /// Increments the number of directories that could not be listed.
+    /// </summary>
+    public void IncrementDirectoriesUnreadable()
+    {
+        Interlocked.Increment(ref _directoriesUnreadable);
+    }
+
+    /// <summary>
+    /// Increments the number of directories skipped by reserved name.
+    /// </summary>
+    public void IncrementDirectoriesSkippedByName()
+    {
+        Interlocked.Increment(ref _directoriesSkippedByName);
     }
 }

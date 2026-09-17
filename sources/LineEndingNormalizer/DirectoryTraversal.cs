@@ -34,7 +34,8 @@ internal static class DirectoryTraversal
     internal static IEnumerable<string> EnumerateCandidateFiles(
         string basePath,
         Action<string>? onWarning = null,
-        string? excludedFullPath = null)
+        string? excludedFullPath = null,
+        Statistics? statistics = null)
     {
         var pending =
             new Stack<string>();
@@ -50,7 +51,8 @@ internal static class DirectoryTraversal
                 TryEnumerate(
                     dir,
                     Directory.EnumerateDirectories,
-                    onWarning);
+                    onWarning,
+                    statistics);
 
             if (subDirectories != null)
             {
@@ -59,6 +61,7 @@ internal static class DirectoryTraversal
                     if (DefaultExcludedDirectoryNames.Contains(
                             Path.GetFileName(subDirectory)))
                     {
+                        statistics?.IncrementDirectoriesSkippedByName();
                         continue;
                     }
 
@@ -80,7 +83,8 @@ internal static class DirectoryTraversal
                 TryEnumerate(
                     dir,
                     Directory.EnumerateFiles,
-                    onWarning);
+                    onWarning,
+                    statistics);
 
             if (files != null)
             {
@@ -178,7 +182,8 @@ internal static class DirectoryTraversal
     internal static List<string>? TryEnumerate(
         string dir,
         Func<string, IEnumerable<string>> enumerate,
-        Action<string>? onWarning = null)
+        Action<string>? onWarning = null,
+        Statistics? statistics = null)
     {
         try
         {
@@ -188,6 +193,8 @@ internal static class DirectoryTraversal
             ex is UnauthorizedAccessException or
             IOException)
         {
+            statistics?.IncrementDirectoriesUnreadable();
+
             onWarning?.Invoke(
                 string.Format(
                     "Skipping directory (cannot list): {0}{1}    {2}",
