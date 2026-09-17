@@ -96,6 +96,12 @@ mirroring the existing UTF-16 guard) and closes a test-coverage gap in the
 backup hash-verification check; both rest on the regression suite, not on
 corpus measurement.
 
+**Correction (added in v1.7.0):** the UTF-32 guard this version ships is
+insufficient — a BOM-less UTF-16 file can misdetect as UTF-32 and pass the
+opposite-order test unchanged, so v1.6.0 as published can silently corrupt
+such a file. v1.7.0 replaces it with an unconditional refusal. See that
+version's entry below and [RELEASE-NOTES-v1.7.0.md](RELEASE-NOTES-v1.7.0.md).
+
 ```
 commit    31dd78ac4c28a9e8713c09c49a13d2f7f8733add   (annotated tag v1.6.0)
 project   1.6.0     manifest 1.6.0.0     binary reports 1.6.0
