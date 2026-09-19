@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace LineEndingNormalizer.Tests;
 
@@ -127,7 +128,8 @@ public sealed class LegacyLineEndingBoundaryTests
     }
 
     // Bytes that must never be treated as line endings on the byte-level path, none of them CR
-    // or LF: an accented letter, NEL, vertical tab, form feed and an ASCII letter.
+    // or LF: an accented letter, 0x85 (NEL as U+0085 in Unicode, an ellipsis in Windows-1252),
+    // vertical tab, form feed and an ASCII letter.
     private static byte[] Filler(int length)
     {
         byte[] pattern = [0xE9, 0x85, 0x0B, 0x0C, (byte)'a'];
@@ -187,7 +189,8 @@ public sealed class LegacyLineEndingBoundaryTests
         }
     }
 
-    // Inputs of length n, times the no-cut, single-cut and pair-of-cuts runs for each.
+    // The runs per input (no cut, every single cut, every pair of cuts) times the inputs of each
+    // length from 0 to the maximum, times the targets.
     private static long ExpectedCases(int maxLength, int alphabetSize, int targets)
     {
         long total = 0;
@@ -234,6 +237,28 @@ public sealed class LegacyLineEndingBoundaryTests
 
         // Guards against the loops silently doing nothing or the input generator changing shape.
         Assert.Equal(ExpectedCases(MaxLength, alphabetSize: 4, targets: Targets.Length), checkedCases);
+    }
+
+    [Fact]
+    public void TheReferenceModelAgreesWithARegularExpressionReplace()
+    {
+        // The reference follows the same rule as the code, so a shared misunderstanding would
+        // pass both. A regular expression states the rule differently: an alternation that tries
+        // CRLF first. Latin-1 maps every byte to one character, so bytes survive the round trip.
+        foreach (LineEnding target in Targets)
+        {
+            string replacement = Encoding.Latin1.GetString(Replacement(target));
+
+            foreach (byte[] input in AllInputs(6))
+            {
+                byte[] viaRegex = Encoding.Latin1.GetBytes(
+                    Regex.Replace(Encoding.Latin1.GetString(input), @"\r\n|\r|\n", replacement));
+
+                Assert.True(
+                    Reference(input, target).AsSpan().SequenceEqual(viaRegex),
+                    $"target {target}, input {Convert.ToHexString(input)}");
+            }
+        }
     }
 
     [Fact]
@@ -299,6 +324,14 @@ public sealed class LegacyLineEndingBoundaryTests
         Assert.True(
             expected.AsSpan().SequenceEqual(converted),
             $"target {target}: same length ({expected.Length}) but different bytes");
+    }
+
+    [Theory]
+    [MemberData(nameof(TargetNames))]
+    public void AnEmptyFileStaysEmpty(string targetName)
+    {
+        // The read loop never runs, so only the final flush and the hash of nothing are involved.
+        AssertConvertsExactly([], Parse(targetName));
     }
 
     // The pair starts one byte before, at, and one byte after the last byte of the first read.
@@ -381,13 +414,29 @@ public sealed class LegacyLineEndingBoundaryTests
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
-    public void AllCrFilesFillTheOutputBufferToItsWorstCase(int reads)
+    public void AllCrFilesDoubleInSizeExactly(int fullReads)
     {
-        // Every CR becomes two bytes, so a full read of CRs doubles in size: the output buffer
-        // has to hold twice the read, plus a carried CR, without overflowing.
-        byte[] source = [.. Enumerable.Repeat(Cr, reads * BufferSize + 1)];
+        // Every CR becomes two bytes, so a read of CRs doubles in size. This checks the result
+        // stays exact at that size. It cannot see an output buffer that is only slightly too
+        // small: the pool rounds the request up to a larger array, so only a capacity of exactly
+        // one read fails here.
+        byte[] source = [.. Enumerable.Repeat(Cr, fullReads * BufferSize + 1)];
 
         AssertConvertsExactly(source, LineEnding.Crlf);
+    }
+
+    // Invokes a private static method and rethrows what it threw, not the reflection wrapper.
+    private static object? InvokeWriter(string name, params object[] arguments)
+    {
+        try
+        {
+            return FindWriterMethod(name).Invoke(null, arguments);
+        }
+        catch (TargetInvocationException ex) when (ex.InnerException is not null)
+        {
+            ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+            throw;
+        }
     }
 
     // Runs the byte-level writer directly so the hashes it records can be checked.
@@ -396,8 +445,8 @@ public sealed class LegacyLineEndingBoundaryTests
     {
         using FileStream source = File.OpenRead(sourcePath);
 
-        object result = FindWriterMethod("WriteConvertedFileBytes")
-            .Invoke(null, [source, target, tempPath, CancellationToken.None])!;
+        object result = InvokeWriter(
+            "WriteConvertedFileBytes", source, target, tempPath, CancellationToken.None)!;
 
         Type type = result.GetType();
 
@@ -406,18 +455,8 @@ public sealed class LegacyLineEndingBoundaryTests
             (byte[])type.GetProperty("SourceSha256")!.GetValue(result)!);
     }
 
-    private static void VerifyBytes(string tempPath, byte[] expectedHash)
-    {
-        try
-        {
-            FindWriterMethod("VerifyConvertedFileBytes")
-                .Invoke(null, [tempPath, expectedHash, CancellationToken.None]);
-        }
-        catch (TargetInvocationException ex) when (ex.InnerException is not null)
-        {
-            ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
-        }
-    }
+    private static void VerifyBytes(string tempPath, byte[] expectedHash) =>
+        InvokeWriter("VerifyConvertedFileBytes", tempPath, expectedHash, CancellationToken.None);
 
     [Theory]
     [MemberData(nameof(TargetNames))]
